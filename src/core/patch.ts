@@ -85,6 +85,17 @@ export function checkLocks(prev: Timeline, next: Timeline, opts: { targets: stri
     out.push(`durationFrames changed (${prev.durationFrames} -> ${next.durationFrames}) without unlock`);
   }
 
+  for (const k of ['fps', 'width', 'height'] as const) {
+    if (prev[k] !== next[k]) out.push(`${k} changed`);
+  }
+  if (!isDeepStrictEqual(prev.style, next.style)) out.push('style is locked');
+  for (const p of prev.overlays) {
+    const n = next.overlays.find((o) => o.id === p.id);
+    if (!n) out.push(`${p.id} (overlay) was removed`);
+    else if (!isDeepStrictEqual(p, n)) out.push(`${p.id} (overlay) is locked`);
+  }
+  for (const n of next.overlays) if (!prev.overlays.some((p) => p.id === n.id)) out.push(`${n.id} (overlay) was added`);
+
   const groups: { kind: 'segment' | 'caption' | 'audio'; before: Item[]; after: Item[] }[] = [
     { kind: 'segment', before: prev.segments, after: next.segments },
     { kind: 'caption', before: prev.captions, after: next.captions },

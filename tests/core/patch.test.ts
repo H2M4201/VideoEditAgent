@@ -53,3 +53,22 @@ test('audio track startFrame change is a violation even with unlock', () => { co
 test('setGain on a target track is allowed', () => { const a = makeTimeline(1);
   const b = applyPatch(a, [{ op:'setGain', trackId:'m1', gain:0.1 }]);
   expect(checkLocks(a, b, { targets:['m1'], unlock:false })).toEqual([]); });
+
+const ov = { id:'o1', kind:'logo' as const, source:'raw/l.png', startFrame:0, endFrame:30, position:'top-left' as const };
+test('overlay change is a violation, with and without unlock', () => { const a = makeTimeline(1); a.overlays = [ov];
+  const b = structuredClone(a); b.overlays[0].endFrame = 40;
+  expect(checkLocks(a, b, { targets:['s1'], unlock:false }).length).toBeGreaterThan(0);
+  expect(checkLocks(a, b, { targets:['o1'], unlock:true }).length).toBeGreaterThan(0); });
+test('overlay added or removed is a violation', () => { const a = makeTimeline(1); const b = structuredClone(a); b.overlays = [ov];
+  expect(checkLocks(a, b, { targets:[], unlock:true }).length).toBeGreaterThan(0);
+  expect(checkLocks(b, a, { targets:[], unlock:true }).length).toBeGreaterThan(0); });
+test('style change is a violation', () => { const a = makeTimeline(1); const b = structuredClone(a); b.style.captionSize = 80;
+  expect(checkLocks(a, b, { targets:['s1'], unlock:true }).length).toBeGreaterThan(0); });
+test('segment removed is a violation', () => { const a = makeTimeline(2); const b = structuredClone(a); b.segments.pop();
+  expect(checkLocks(a, b, { targets:['s2'], unlock:true }).length).toBeGreaterThan(0); });
+test('caption added is a violation', () => { const a = makeTimeline(1); const b = structuredClone(a);
+  b.captions.push({ ...b.captions[0], id:'c9' });
+  expect(checkLocks(a, b, { targets:['c9'], unlock:true }).length).toBeGreaterThan(0); });
+test('fps/width/height change is a violation', () => { const a = makeTimeline(1);
+  for (const k of ['fps','width','height'] as const) { const b = structuredClone(a) as any; b[k] = 1;
+    expect(checkLocks(a, b, { targets:[], unlock:true }).length).toBeGreaterThan(0); } });
