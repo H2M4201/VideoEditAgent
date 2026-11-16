@@ -235,11 +235,15 @@ default engine, model).
 
 ### 5.14 Clarifications after review (assistant's calls unless marked)
 
-- **Build order.** Built-in engine first, end to end. The CapCut engine is
-  built second and needs a sample draft folder and the version number from
-  an agency machine before work starts. If the agency's version encrypts
-  drafts and cannot be pinned to an older one, the CapCut engine is dropped
-  from Phase 1 and the app ships with the built-in engine only.
+- **Build order and CapCut version (decided by the user).** The CapCut
+  version is not known in advance; the app finds it by checking the user's
+  machine: it locates the CapCut install and drafts folder, reads the
+  version, and tests whether existing drafts are readable. Settings show the
+  detected version and whether the CapCut engine is available on that
+  machine. If drafts are encrypted or the format is unrecognised, the CapCut
+  engine is shown as unavailable with the reason, and the built-in engine is
+  used. The built-in engine is built first; the CapCut engine second, and it
+  still needs one sample draft folder from a real machine to be verified.
 - **What "only that segment changes" guarantees.** The guarantee is at the
   timeline level (section 6): untouched segments and captions are identical
   between versions. Re-rendering only changed segments is a speed
@@ -266,9 +270,8 @@ default engine, model).
   tracks will be uploaded, which is an exception to the "media never leaves
   the machine" rule that the user accepts by enabling it. Agency hardware is
   unknown; the builder should measure on a mid-range laptop without a GPU.
-- **Language.** UI in Vietnamese and English, switchable, Vietnamese by
-  default. Prompts and guidelines may be written in either. (To be confirmed
-  by the user.)
+- **Language (decided by the user).** The UI is switchable between
+  Vietnamese and English. Prompts and guidelines may be written in either.
 
 ## 6. Acceptance
 
