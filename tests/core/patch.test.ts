@@ -72,3 +72,23 @@ test('caption added is a violation', () => { const a = makeTimeline(1); const b 
 test('fps/width/height change is a violation', () => { const a = makeTimeline(1);
   for (const k of ['fps','width','height'] as const) { const b = structuredClone(a) as any; b[k] = 1;
     expect(checkLocks(a, b, { targets:[], unlock:true }).length).toBeGreaterThan(0); } });
+
+test('with unlock, a non-target pure shift is allowed (segments, captions and words move together)', () => { const a = makeTimeline(3);
+  a.captions[2].words = [{ text:'a', startFrame:180, endFrame:200 }, { text:'b', startFrame:200, endFrame:270 }];
+  const b = applyPatch(a, [{ op:'retime', segmentId:'s1', durationFrames:60 }]);
+  expect(b.captions[2].words.map(w => [w.startFrame, w.endFrame])).toEqual([[150, 170], [170, 240]]);
+  expect(checkLocks(a, b, { targets:['s1'], unlock:true })).toEqual([]); });
+test('with unlock, a non-target caption stretch is refused', () => { const a = makeTimeline(3);
+  const b = applyPatch(a, [{ op:'retime', segmentId:'s1', durationFrames:60 }]);
+  b.captions[2].endFrame = 245; // shifted start by -30 but end by -25
+  expect(checkLocks(a, b, { targets:['s1'], unlock:true })).toEqual(['c3 changed but is not a target']); });
+test('with unlock, a non-target caption word moved by a different delta is refused', () => { const a = makeTimeline(3);
+  a.captions[2].words = [{ text:'a', startFrame:180, endFrame:200 }];
+  const b = applyPatch(a, [{ op:'retime', segmentId:'s1', durationFrames:60 }]);
+  b.captions[2].words[0].startFrame = 155;
+  expect(checkLocks(a, b, { targets:['s1'], unlock:true })).toEqual(['c3 changed but is not a target']); });
+test('with unlock, a non-target segment that changes duration is refused', () => { const a = makeTimeline(3);
+  const b = structuredClone(a); b.segments[2].durationFrames = 60; b.segments[2].sourceOut = 2; b.durationFrames = 240;
+  expect(checkLocks(a, b, { targets:['s1'], unlock:true })).toContain('s3 changed but is not a target'); });
+test('retime rejects a non-integer or < 1 duration', () => { const a = makeTimeline(2);
+  for (const d of [0, -30, 45.5, NaN]) expect(() => applyPatch(a, [{ op:'retime', segmentId:'s1', durationFrames:d }])).toThrow('invalid duration'); });

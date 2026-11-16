@@ -41,6 +41,7 @@ export function applyPatch(t: Timeline, ops: PatchOp[]): Timeline {
       case 'setCaptionAnimation': find(next.captions, op.captionId).animation = op.animation; break;
       case 'setGain': find(next.audio, op.trackId).gain = op.gain; break;
       case 'retime': {
+        if (!Number.isInteger(op.durationFrames) || op.durationFrames < 1) throw new Error('invalid duration');
         const s = find(next.segments, op.segmentId);
         const oldEnd = s.startFrame + s.durationFrames;
         const delta = op.durationFrames - s.durationFrames;
@@ -70,10 +71,17 @@ export function setApproved(t: Timeline, id: string, approved: boolean): Timelin
 
 type Item = { id: string; startFrame: number; endFrame?: number; words?: { startFrame: number; endFrame: number }[] };
 
-/** Copy of an item with all position data removed, for "differs only by a shift" comparisons. */
-function withoutPosition(item: Item): unknown {
-  const { startFrame: _s, endFrame: _e, words, ...rest } = item;
-  return words ? { ...rest, words: words.map((w) => ({ ...w, startFrame: 0, endFrame: 0 })) } : rest;
+/** Copy of an item with every frame position moved back by `delta`. */
+function shiftedBack(item: Item, delta: number): Item {
+  const out: Item = { ...item, startFrame: item.startFrame - delta };
+  if (item.endFrame !== undefined) out.endFrame = item.endFrame - delta;
+  if (item.words) out.words = item.words.map((w) => ({ ...w, startFrame: w.startFrame - delta, endFrame: w.endFrame - delta }));
+  return out;
+}
+
+/** True when `n` is `p` moved in time as a whole: every frame position (start, end, words) by the same delta, nothing else changed. */
+function isPureShift(p: Item, n: Item): boolean {
+  return isDeepStrictEqual(p, shiftedBack(n, n.startFrame - p.startFrame));
 }
 
 /** Returns violations; [] means the change respects all locks. */
@@ -121,12 +129,12 @@ export function checkLocks(prev: Timeline, next: Timeline, opts: { targets: stri
         const a = p as unknown as { startFrame: number; durationFrames: number };
         const b = n as unknown as typeof a;
         if (a.startFrame !== b.startFrame || a.durationFrames !== b.durationFrames) {
-          out.push(`${p.id}: segment boundaries changed without unlock`);
+          out.push(`${p.id}: segment start or duration changed without unlock`);
           continue;
         }
       }
       if (!targets.has(p.id)) {
-        const onlyShifted = opts.unlock && kind !== 'audio' && isDeepStrictEqual(withoutPosition(p), withoutPosition(n));
+        const onlyShifted = opts.unlock && kind !== 'audio' && isPureShift(p, n);
         if (!onlyShifted) out.push(`${p.id} changed but is not a target`);
       }
     }
