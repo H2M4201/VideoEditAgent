@@ -1,4 +1,4 @@
-import { AbsoluteFill, Audio, Sequence } from 'remotion';
+import { AbsoluteFill, Audio, Sequence, useVideoConfig } from 'remotion';
 import { Captions } from './Captions';
 import { loadFonts } from './fonts';
 import { mediaUrl, type VideoProps } from './media';
@@ -9,6 +9,7 @@ loadFonts();
 
 /** The whole timeline: segments, then captions and overlays on top; narration and music tracks. */
 export function Video({ timeline, mediaBase }: VideoProps) {
+  const { fps } = useVideoConfig(); // = timeline.fps (set by calculateMetadata)
   return (
     <AbsoluteFill style={{ backgroundColor: 'black' }}>
       {timeline.segments.map((s, i) => (
@@ -18,7 +19,7 @@ export function Video({ timeline, mediaBase }: VideoProps) {
       ))}
       {timeline.audio.map((a) => (
         <Sequence key={a.id} from={a.startFrame} layout="none">
-          <Audio src={mediaUrl(mediaBase, a.source)} trimBefore={Math.round(a.sourceIn * timeline.fps)} volume={a.gain} />
+          <Audio src={mediaUrl(mediaBase, a.source)} trimBefore={Math.round(a.sourceIn * fps)} volume={a.gain} />
         </Sequence>
       ))}
       <Captions captions={timeline.captions} style={timeline.style} />

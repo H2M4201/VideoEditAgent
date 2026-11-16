@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execa } from 'execa';
 import { builtinEngine } from '../../src/engines/builtin/render';
-import { serveFolder } from '../../src/engines/builtin/server';
+import { openServerCount, serveFolder } from '../../src/engines/builtin/server';
 import { fitCaptionSize } from '../../src/engines/builtin/remotion/Captions';
 import { fontStack, mediaUrl } from '../../src/engines/builtin/remotion/media';
 import { probeMedia } from '../../src/project/probe';
@@ -86,6 +86,18 @@ describe('builtin engine render', () => {
     expect(m.durationSec).toBeCloseTo(2, 1);
     expect(m.hasAudio).toBe(true);
     expect(await frameLuma(r.path, 1.5)).toBeGreaterThan(16);
+  }, RENDER_TIMEOUT);
+
+  test('closes the media server when the browser fails to launch', async () => {
+    const saved = process.env.VEA_BROWSER;
+    process.env.VEA_BROWSER = path.join(projectDir, 'no-such-browser');
+    try {
+      await expect(builtinEngine.render({ projectDir, timeline: twoSecondTimeline('a.mp4', 'b.mp4'), outDir, name: 'nobrowser' }))
+        .rejects.toThrow();
+    } finally {
+      if (saved === undefined) delete process.env.VEA_BROWSER; else process.env.VEA_BROWSER = saved;
+    }
+    expect(openServerCount()).toBe(0);
   }, RENDER_TIMEOUT);
 
   test('renders sources with Vietnamese names and spaces', async () => {

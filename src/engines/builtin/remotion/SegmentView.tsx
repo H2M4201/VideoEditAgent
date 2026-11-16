@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { AbsoluteFill, Freeze, interpolate, OffthreadVideo, useCurrentFrame } from 'remotion';
+import { AbsoluteFill, Freeze, interpolate, OffthreadVideo, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { Crop, Segment } from '../../../core/timeline';
 import { mediaUrl } from './media';
 
@@ -25,12 +25,13 @@ function cropStyle(crop: Crop): CSSProperties {
 /** One segment's footage, cropped and with its effects, at the current frame of its Sequence. */
 export function SegmentView({ segment, mediaBase, muted }: { segment: Segment; mediaBase: string; muted?: boolean }) {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
   return (
     <AbsoluteFill style={{ backgroundColor: 'black', overflow: 'hidden' }}>
       <AbsoluteFill style={{ transform: `scale(${effectScale(segment, frame)})` }}>
         <OffthreadVideo
           src={mediaUrl(mediaBase, segment.source)}
-          trimBefore={Math.round(segment.sourceIn * 30)}
+          trimBefore={Math.round(segment.sourceIn * fps)}
           playbackRate={segment.speed}
           volume={segment.clipGain}
           muted={muted}

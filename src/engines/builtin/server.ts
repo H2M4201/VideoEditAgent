@@ -9,6 +9,13 @@ const TYPES: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.svg': 'image/svg+xml',
 };
 
+let openServers = 0;
+
+/** Number of media servers currently listening (lets tests check that renders close theirs). */
+export function openServerCount(): number {
+  return openServers;
+}
+
 export type MediaServer = { /** e.g. http://127.0.0.1:41234 (no trailing slash) */ url: string; close(): Promise<void> };
 
 /** Decodes a URL path into a file inside `root` (real path), or null if it is malformed or escapes `root`. */
@@ -68,9 +75,16 @@ export async function serveFolder(rootDir: string): Promise<MediaServer> {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => resolve());
   });
+  openServers += 1;
   const { port } = server.address() as AddressInfo;
+  let closed = false;
   return {
     url: `http://127.0.0.1:${port}`,
-    close: () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }),
+    close: () => new Promise<void>((resolve) => {
+      if (closed) { resolve(); return; }
+      closed = true;
+      server.closeAllConnections();
+      server.close(() => { openServers -= 1; resolve(); });
+    }),
   };
 }

@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bundle } from '@remotion/bundler';
@@ -35,6 +35,8 @@ function serveUrl(): Promise<string> {
  */
 function browserOptions(): { browserExecutable: string | null; chromeMode: 'headless-shell' | 'chrome-for-testing'; chromiumOptions: ChromiumOptions } {
   const exe = process.env.VEA_BROWSER || null;
+  // Checked here because Remotion's ensure-browser queue stays rejected for the rest of the process after one failure.
+  if (exe && !existsSync(exe)) throw new Error(`VEA_BROWSER is set to '${exe}' but that file does not exist`);
   const chromeMode = exe && !/headless/i.test(path.basename(exe)) ? 'chrome-for-testing' : 'headless-shell';
   return { browserExecutable: exe, chromeMode, chromiumOptions: {} };
 }
@@ -44,9 +46,10 @@ async function renderTimeline({ projectDir, timeline, outDir, name, onProgress }
   await fs.mkdir(outDir, { recursive: true });
   const url = await serveUrl();
   const server = await serveFolder(projectDir);
-  const browser = browserOptions();
-  const puppeteerInstance = await openBrowser('chrome', { ...browser, logLevel: 'error' });
+  let puppeteerInstance: Awaited<ReturnType<typeof openBrowser>> | undefined;
   try {
+    const browser = browserOptions();
+    puppeteerInstance = await openBrowser('chrome', { ...browser, logLevel: 'error' });
     const inputProps: VideoProps = { timeline, mediaBase: server.url };
     const composition = await selectComposition({ serveUrl: url, id: COMPOSITION_ID, inputProps, puppeteerInstance, logLevel: 'error', ...browser });
     await renderMedia({
@@ -65,7 +68,7 @@ async function renderTimeline({ projectDir, timeline, outDir, name, onProgress }
     });
     return { kind: 'mp4', path: out };
   } finally {
-    await puppeteerInstance.close({ silent: true }).catch(() => {});
+    await puppeteerInstance?.close({ silent: true }).catch(() => {});
     await server.close();
   }
 }
