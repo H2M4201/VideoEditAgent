@@ -253,3 +253,18 @@ export async function describeVideo(p: Project, videoId: string) {
   const versions = (await store.list()).map(v => ({ ...v, output: meta.outputs[v.n] ? outputOf(p, meta.outputs[v.n]) : null }));
   return { videoId, engine: meta.engine, prompt: meta.prompt, roles: meta.roles, versions, latest: await store.latest() };
 }
+
+/** The project's videos, newest first, each with its latest version and the render that version shows. */
+export async function listVideos(p: Project) {
+  const ids = await fs.readdir(vea(p.dir, 'videos')).catch(() => [] as string[]);
+  const out = [];
+  for (const videoId of ids) {
+    const meta = await readVideoMeta(p.dir, videoId);
+    if (!meta) continue;
+    const versions = await new VersionStore(videoDir(p.dir, videoId)).list();
+    const latestVersion = versions.at(-1)?.n ?? null;
+    const file = latestVersion === null ? undefined : meta.outputs[latestVersion];
+    out.push({ videoId, prompt: meta.prompt, engine: meta.engine, createdAt: meta.createdAt, latestVersion, output: file ? outputOf(p, file) : null });
+  }
+  return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : a.videoId < b.videoId ? 1 : -1));
+}

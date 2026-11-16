@@ -167,7 +167,17 @@ describe('projects', () => {
     const again = await post('/api/projects', { dir: proj + '/' });
     expect(again.json().project.id).toBe(projectId);
     expect((await get('/api/projects')).json()).toEqual([body.project]);
+    expect(again.json().project).toEqual(body.project);
   });
+
+  test('two folders registered at the same moment are both kept', async () => {
+    const [a, b] = await Promise.all([makeProject({ rawNames: ['a.mp4'] }), makeProject({ rawNames: ['a.mp4'] })]);
+    const res = await Promise.all([post('/api/projects', { dir: a }), post('/api/projects', { dir: b })]);
+    expect(res.map(r => r.statusCode)).toEqual([200, 200]);
+    const ids = (await settings.get()).projects.map(p => p.id);
+    for (const r of res) expect(ids).toContain(r.json().project.id);
+    expect(ids).toContain(projectId);
+  }, 60_000);
 
   test('bad folders are rejected with the project error code', async () => {
     expect((await post('/api/projects', { dir: 'relative/dir' })).statusCode).toBe(400);
@@ -237,6 +247,10 @@ const vurl = () => `/api/projects/${projectId}/videos/${videoId}`;
 const video = async () => (await get(vurl())).json();
 
 describe('videos', () => {
+  test('GET videos is [] for a project with no videos', async () => {
+    expect((await get(`/api/projects/${projectId}/videos`)).json()).toEqual([]);
+  });
+
   test('rejects roles that name unknown files or roles', async () => {
     const bad1 = await post(`/api/projects/${projectId}/videos`, { prompt: 'x', roles: [...roles, { ...roles[0], path: '../etc/passwd' }], engine: 'builtin' });
     expect([bad1.statusCode, bad1.json().error.code]).toEqual([400, 'BAD_ROLES']);
@@ -266,7 +280,7 @@ describe('videos', () => {
     expect(v.versions).toEqual([expect.objectContaining({ n: 1, note: 'generated', output: { url: `/media/${projectId}/.vea/videos/${videoId}/v1.mp4`, path: expect.any(String) } })]);
     expect(v.latest.n).toBe(1);
     expect(v.latest.timeline).toEqual(planned());
-    expect(v.engine).toBe('builtin');
+    expect([v.engine, v.prompt]).toEqual(['builtin', '45s tour']);
     expect((await get(`/api/projects/${projectId}/videos/nope`)).statusCode).toBe(404);
   });
 
@@ -344,6 +358,20 @@ describe('videos', () => {
       await waitJob(blocker.id);
     }
   });
+});
+
+describe('video list', () => {
+  test('GET videos lists videos newest first with their latest version and output', async () => {
+    model = new FakeModel([turn('submit_timeline', { timeline: planned(), notFollowed: [] })]);
+    const j = await runJob(`/api/projects/${projectId}/videos`, { prompt: 'second take', roles, engine: 'builtin' });
+    const second = (j.result as { videoId: string }).videoId;
+    const list = (await get(`/api/projects/${projectId}/videos`)).json();
+    expect(list.map((x: { videoId: string }) => x.videoId)).toEqual([second, videoId]);
+    expect(list[0]).toEqual({ videoId: second, prompt: 'second take', engine: 'builtin', createdAt: expect.any(String), latestVersion: 1,
+      output: { url: `/media/${projectId}/.vea/videos/${second}/v1.mp4`, path: expect.any(String) } });
+    expect(list[1]).toMatchObject({ videoId, prompt: '45s tour', latestVersion: 6, output: { url: expect.stringMatching(/\/v6\.mp4$/) } });
+    expect((await get('/api/projects/ffffffff/videos')).statusCode).toBe(404);
+  }, 30_000);
 });
 
 describe('jobs', () => {

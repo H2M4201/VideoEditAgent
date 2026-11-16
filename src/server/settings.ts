@@ -46,9 +46,11 @@ export class SettingsStore {
     return { ...structuredClone(DEFAULT_SETTINGS), ...stored };
   }
 
-  update(p: Partial<Settings>): Promise<Settings> {
+  /** Merges `p` into the stored settings. Pass a function to compute the change from the latest settings inside the lock. */
+  update(p: Partial<Settings> | ((current: Settings) => Partial<Settings>)): Promise<Settings> {
     const next = this.chain.then(async () => {
-      const merged: Settings = { ...(await this.get()), ...p };
+      const current = await this.get();
+      const merged: Settings = { ...current, ...(typeof p === 'function' ? p(current) : p) };
       await this.write(merged);
       return merged;
     });

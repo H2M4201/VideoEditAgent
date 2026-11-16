@@ -11,7 +11,7 @@ import { scanProject } from '../project/scan';
 import type { AppDeps } from './app';
 import { AppError, parseBody } from './errors';
 import type { Job, JobMeta, Report } from './jobs';
-import { approveItem, describeVideo, ensureFfmpeg, preparedPaths, readVideoMeta, runFix, runGenerate, runPrepare, runRevert,
+import { approveItem, describeVideo, ensureFfmpeg, listVideos, preparedPaths, readVideoMeta, runFix, runGenerate, runPrepare, runRevert,
   videoDir, type JobDeps } from './pipeline';
 import type { ProjectEntry } from './settings';
 
@@ -55,13 +55,10 @@ export function registerProjectRoutes(app: FastifyInstance, deps: AppDeps & { en
     const real = await fs.realpath(dir).catch(() => path.resolve(dir));
     const scan = await scanProject(real);
     const id = projectId(real);
-    const { projects } = await deps.settings.get();
-    let entry = projects.find(x => x.id === id);
-    if (!entry) {
-      entry = { id, dir: real, name: path.basename(real) };
-      await deps.settings.update({ projects: [...projects, entry] });
-    }
-    return { project: entry, scan };
+    const fresh: ProjectEntry = { id, dir: real, name: path.basename(real) };
+    // Read-modify-write inside the store's lock, so concurrent registrations all persist.
+    const saved = await deps.settings.update(s => (s.projects.some(x => x.id === id) ? {} : { projects: [...s.projects, fresh] }));
+    return { project: saved.projects.find(x => x.id === id)!, scan };
   });
 
   app.get('/api/projects', async () => (await deps.settings.get()).projects);
@@ -101,6 +98,8 @@ export function registerProjectRoutes(app: FastifyInstance, deps: AppDeps & { en
     return enqueue(reply, 'generate', { projectId: p.id, videoId },
       (d, report) => runGenerate(p, { videoId, prompt: body.prompt, roles, engine: engineId }, d, report));
   });
+
+  app.get('/api/projects/:id/videos', async req => listVideos(await project((req.params as P).id)));
 
   app.get('/api/projects/:id/videos/:vid', async req => {
     const p = await project((req.params as P).id);

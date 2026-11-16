@@ -1,7 +1,3 @@
-/** List prices (USD per million tokens) of the default model, claude-opus-5-5; settings defaults (Task 10). */
-export const DEFAULT_INPUT_PRICE_PER_MTOK = 4;
-export const DEFAULT_OUTPUT_PRICE_PER_MTOK = 20;
-
 const TOKENS_PER_FRAME = 700;
 const CHARS_PER_TOKEN = 3;
 const OUTPUT_TOKENS = 6000;

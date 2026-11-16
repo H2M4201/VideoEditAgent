@@ -36,3 +36,10 @@ test('maskApiKey keeps only the last 4 characters', () => {
   expect(maskApiKey('sk-ant-secret-1234')).toBe('••••1234');
   expect(maskApiKey('')).toBe('');
 });
+
+test('update with a function sees the latest settings, so concurrent read-modify-writes keep every change', async () => {
+  const store = new SettingsStore(await tempFile());
+  const add = (id: string) => store.update(s => ({ projects: [...s.projects, { id, dir: `/${id}`, name: id }] }));
+  await Promise.all([add('a'), add('b'), add('c')]);
+  expect((await store.get()).projects.map(p => p.id)).toEqual(['a', 'b', 'c']);
+});
