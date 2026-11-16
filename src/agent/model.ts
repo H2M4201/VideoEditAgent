@@ -11,7 +11,9 @@ export type ModelTurn = {
 export interface AgentModel { run(req: { system: string; messages: unknown[]; tools: ToolDef[] }): Promise<ModelTurn>; }
 
 export class AgentError extends Error {
-  constructor(public code: 'NO_API_KEY' | 'INVALID_AFTER_RETRIES' | 'API_ERROR', message: string) { super(message); this.name = 'AgentError'; }
+  constructor(public code: 'NO_API_KEY' | 'INVALID_AFTER_RETRIES' | 'API_ERROR' | 'API_KEY_REJECTED' | 'API_RATE_LIMIT', message: string) {
+    super(message); this.name = 'AgentError';
+  }
 }
 
 export const DEFAULT_MODEL = 'claude-opus-5-5';
@@ -41,7 +43,12 @@ export class AnthropicModel implements AgentModel {
         tool_choice: { type: 'auto' },
       });
     } catch (e) {
-      throw new AgentError('API_ERROR', (e as Error).message);
+      // The SDK's APIError carries the HTTP status; connection failures have none.
+      const status = (e as { status?: unknown }).status;
+      const message = (e as Error).message;
+      if (typeof status !== 'number') throw new AgentError('API_ERROR', message);
+      const code = status === 401 || status === 403 ? 'API_KEY_REJECTED' : status === 429 ? 'API_RATE_LIMIT' : 'API_ERROR';
+      throw new AgentError(code, message.startsWith(`${status}`) ? message : `${status}: ${message}`);
     }
     if (res.stop_reason === 'refusal') throw new AgentError('API_ERROR', 'The model declined the request');
     const toolCalls: ModelTurn['toolCalls'] = [];

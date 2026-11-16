@@ -186,4 +186,15 @@ describe('planTimeline', () => {
     const out = await planTimeline(ctx, new FakeModel([submit(titled)]));
     expect(out.timeline.overlays).toHaveLength(1);
   });
+
+  it('sends at most 100 images; shots without a frame are still listed as text', async () => {
+    const shots = Array.from({ length: 150 }, (_, i) => ({ index: i, startSec: i / 15, endSec: (i + 1) / 15, framePath }));
+    const many = { ...ctx, analysis: { ...ctx.analysis, 'raw/a.mp4': { ...ctx.analysis['raw/a.mp4'], shots } } };
+    const fake = new FakeModel([submit(timeline())]);
+    await planTimeline(many, fake);
+    const m = JSON.stringify(fake.calls[0].messages);
+    expect((m.match(/image\/jpeg/g) ?? []).length).toBe(100);
+    expect(m).toContain('shot [149, 9.93, 10]');
+    expect((m.match(/\] \(no frame\)/g) ?? []).length).toBe(52); // 150 + 1 (b) + 1 (style) = 152 shots, 100 frames
+  });
 });

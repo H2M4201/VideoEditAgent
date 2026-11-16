@@ -80,6 +80,7 @@ describe('fixTimeline', () => {
       expect(r.timeline.audio).toEqual(cur.audio);
       expect(r.timeline.segments[2]).toMatchObject({ source: 'raw/b.mp4', sourceIn: 5, sourceOut: 8 });
       expect(r.targets).toEqual(['s3']);
+      expect(r.changed).toEqual(['s3']);
       expect(r.summary).toBe('Swapped the shot.');
     }
   });
@@ -88,7 +89,7 @@ describe('fixTimeline', () => {
     const bad = () => patchTurn(['s3'], [...swapS3, { op: 'setEffects', segmentId: 's4', effects: [{ type: 'pushIn' }] }]);
     const fake = new FakeModel([bad(), bad(), bad()]);
     const r = await fixTimeline({ ...ctx, feedback: 'swap the shot at 0:07' }, fake);
-    expect(r).toMatchObject({ status: 'refused', needsUnlock: false });
+    expect(r).toMatchObject({ status: 'refused', code: 'COULD_NOT_APPLY', needsUnlock: false });
     if (r.status === 'refused') expect(r.reason).toContain('s4 changed but is not a target');
     expect(fake.calls).toHaveLength(3);
     expect(sent(fake, 1)).toContain('tool_result');
@@ -137,14 +138,14 @@ describe('fixTimeline', () => {
   test('approved target is refused without calling the model', async () => {
     const fake = new FakeModel([]);
     const r = await fixTimeline({ ...ctx, current: setApproved(setApproved(makeTimeline(5), 's3', true), 'c3', true), feedback: 'swap 0:07' }, fake);
-    expect(r).toEqual({ status: 'refused', reason: 'That part is approved. Remove the approval to change it.', needsUnlock: false });
+    expect(r).toEqual({ status: 'refused', code: 'APPROVED', reason: 'That part is approved. Remove the approval to change it.', needsUnlock: false });
     expect(fake.calls).toHaveLength(0);
   });
 
   test('a time beyond the end is refused without calling the model', async () => {
     const fake = new FakeModel([]);
     const r = await fixTimeline({ ...ctx, feedback: 'swap the shot at 0:20' }, fake);
-    expect(r).toEqual({ status: 'refused', reason: 'There is nothing at that time; the video is 0:15 long.', needsUnlock: false });
+    expect(r).toEqual({ status: 'refused', code: 'NOTHING_AT_TIME', reason: 'There is nothing at that time; the video is 0:15 long.', needsUnlock: false });
     expect(fake.calls).toHaveLength(0);
   });
 
@@ -153,7 +154,7 @@ describe('fixTimeline', () => {
   test('shorten request without unlock reports needsUnlock', async () => {
     const fake = new FakeModel([retime(), retime(), retime()]);
     const r = await fixTimeline({ ...ctx, feedback: 'make the shot at 0:07 shorter' }, fake);
-    expect(r).toMatchObject({ status: 'refused', needsUnlock: true });
+    expect(r).toMatchObject({ status: 'refused', code: 'COULD_NOT_APPLY', needsUnlock: true });
     if (r.status === 'refused') expect(r.reason).toMatch(/^The fix could not be made.*duration.*\.$/);
     expect(fake.calls).toHaveLength(3);
   });
@@ -167,13 +168,28 @@ describe('fixTimeline', () => {
       expect(r.timeline.durationFrames).toBe(cur.durationFrames - 30);
       expect(r.timeline.segments.slice(0, 2)).toEqual(cur.segments.slice(0, 2));
       expect(r.timeline.segments.map(s => s.startFrame)).toEqual([0, 90, 180, 240, 330]);
+      expect(r.changed).toEqual(['s3', 'c3']); // c3 starts inside s3 and is squeezed with it
     }
+  });
+
+  test('needsUnlock is set only for lock violations that need unlock, not for any error mentioning a duration', async () => {
+    const badRange = () => patchTurn(['s3'], [{ op: 'swapSource', segmentId: 's3', source: 'raw/b.mp4', sourceIn: 0, sourceOut: 1, speed: 1 }]);
+    const r = await fixTimeline({ ...ctx, feedback: 'swap the shot at 0:07' }, new FakeModel([badRange(), badRange(), badRange()]));
+    expect(r).toMatchObject({ status: 'refused', code: 'COULD_NOT_APPLY', needsUnlock: false });
+    if (r.status === 'refused') expect(r.reason).toContain('durationFrames 90 does not match source range');
+  });
+
+  test('the model is told to write summary and reason in the language of the feedback', async () => {
+    const fake = new FakeModel([patchTurn(['s3'], swapS3)]);
+    await fixTimeline({ ...ctx, feedback: 'đổi cảnh ở 0:07' }, fake);
+    expect(sent(fake, 0)).toMatch(/summary and reason[^"]*in the language of the user's feedback/);
+    expect(JSON.stringify(fake.calls[0].tools)).not.toContain('English');
   });
 
   test('the refuse tool passes the reason through', async () => {
     const fake = new FakeModel([turn('refuse', { reason: 'The guideline asks for calm pacing; a speed ramp would break it.', needsUnlock: false })]);
     const r = await fixTimeline({ ...ctx, feedback: 'add a fast speed ramp at 0:07' }, fake);
-    expect(r).toEqual({ status: 'refused', reason: 'The guideline asks for calm pacing; a speed ramp would break it.', needsUnlock: false });
+    expect(r).toEqual({ status: 'refused', code: 'MODEL_REFUSED', reason: 'The guideline asks for calm pacing; a speed ramp would break it.', needsUnlock: false });
   });
 
   test('a refuse asking for unlock is passed through', async () => {
@@ -212,6 +228,14 @@ describe('fixTimeline', () => {
     expect(m).toMatch(/image files available for logo overlays: reference\/logo\.png/i);
     expect(m).toContain('image/jpeg');
     expect(m).not.toContain('video/mp4');
+  });
+
+  test('the fix message keeps to the same 100-image budget', async () => {
+    const framePath = ctx.analysis['raw/a.mp4'].shots[0].framePath;
+    const shots = Array.from({ length: 130 }, (_, i) => ({ index: i, startSec: i * 0.4, endSec: (i + 1) * 0.4, framePath }));
+    const fake = new FakeModel([patchTurn(['s3'], swapS3)]);
+    await fixTimeline({ ...ctx, analysis: { ...ctx.analysis, 'raw/a.mp4': { ...ctx.analysis['raw/a.mp4'], shots } }, feedback: 'swap the shot at 0:07' }, fake);
+    expect((sent(fake, 0).match(/image\/jpeg/g) ?? []).length).toBe(100);
   });
 
   test('caption-only candidates send no frames', async () => {

@@ -110,11 +110,65 @@ export type ContentBlock = TextBlock | ImageBlock;
 const text = (t: string): TextBlock => ({ type: 'text', text: t });
 const sec = (n: number) => Math.round(n * 100) / 100;
 
-/** One text line per shot followed by its JPEG frame; only sampled frames are sent, never the media file. */
-async function shotBlocks(shots: Shot[]): Promise<ContentBlock[]> {
+// ---- frame budget ----
+
+/** Most images one request may carry (raw and style frames together). */
+export const MAX_IMAGES = 100;
+/** Most style-reference frames in one request, all style files together. */
+export const MAX_STYLE_IMAGES = 12;
+
+/** `k` of `n` positions spread evenly over 0..n-1 (all of them when k >= n). */
+function spread(n: number, k: number): number[] {
+  if (k >= n) return Array.from({ length: n }, (_, i) => i);
+  return Array.from({ length: k }, (_, j) => Math.floor(((j + 0.5) * n) / k));
+}
+
+/** Splits `budget` over files by their counts (largest remainder), never giving a file more than it has; `min1`: each non-empty file gets 1 first. */
+function allocate(counts: number[], budget: number, min1: boolean): number[] {
+  if (counts.reduce((a, b) => a + b, 0) <= budget) return [...counts];
+  const out: number[] = counts.map(c => (min1 && c > 0 ? 1 : 0));
+  const rest = counts.map((c, i) => c - out[i]);
+  const remaining = Math.max(0, budget - out.reduce((a, b) => a + b, 0));
+  const restTotal = rest.reduce((a, b) => a + b, 0);
+  if (remaining === 0 || restTotal === 0) return out;
+  const ideal = rest.map(r => (r * remaining) / restTotal);
+  ideal.forEach((x, i) => { out[i] += Math.floor(x); });
+  let left = remaining - ideal.reduce((a, x) => a + Math.floor(x), 0);
+  const byFraction = ideal.map((x, i) => [x - Math.floor(x), i] as const).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+  for (const [, i] of byFraction) { if (left <= 0) break; if (out[i] < counts[i]) { out[i] += 1; left -= 1; } }
+  return out;
+}
+
+/**
+ * Which shots (by position in each file's shot list) get their frame sent. At most MAX_IMAGES in total: every raw file keeps at
+ * least one, style references share at most MAX_STYLE_IMAGES, and the rest of the budget goes to raw files by shot count.
+ * Within a file the kept shots are spread evenly. Used for both plan and fix messages, and for the cost estimate.
+ */
+export function frameSelection(files: { raw: { path: string; shots: number }[]; style: { path: string; shots: number }[] }): Record<string, number[]> {
+  const rawMin = files.raw.filter(f => f.shots > 0).length;
+  const styleShots = files.style.reduce((n, f) => n + f.shots, 0);
+  const styleBudget = Math.min(styleShots, MAX_STYLE_IMAGES, Math.max(0, MAX_IMAGES - rawMin));
+  const styleAlloc = allocate(files.style.map(f => f.shots), styleBudget, false);
+  const rawAlloc = allocate(files.raw.map(f => f.shots), MAX_IMAGES - styleAlloc.reduce((a, b) => a + b, 0), true);
+  const out: Record<string, number[]> = {};
+  files.raw.forEach((f, i) => { out[f.path] = spread(f.shots, rawAlloc[i]); });
+  files.style.forEach((f, i) => { out[f.path] = spread(f.shots, styleAlloc[i]); });
+  return out;
+}
+
+/** The frame selection for a plan or fix request: every raw file, plus the given style references. */
+export function requestFrames(scan: ProjectScan, analysis: Record<string, FileAnalysis>, stylePaths: string[]): Record<string, number[]> {
+  const shots = (p: string) => ({ path: p, shots: analysis[p]?.shots.length ?? 0 });
+  return frameSelection({ raw: scan.raw.map(m => shots(m.path)), style: stylePaths.map(shots) });
+}
+
+/** One text line per shot followed by its JPEG frame when the shot is in `keep`; only sampled frames are sent, never the media file. */
+async function shotBlocks(shots: Shot[], keep: number[]): Promise<ContentBlock[]> {
   const out: ContentBlock[] = [];
-  for (const s of shots) {
-    out.push(text(`shot [${s.index}, ${sec(s.startSec)}, ${sec(s.endSec)}]`));
+  for (const [i, s] of shots.entries()) {
+    const line = `shot [${s.index}, ${sec(s.startSec)}, ${sec(s.endSec)}]`;
+    if (!keep.includes(i)) { out.push(text(`${line} (no frame)`)); continue; }
+    out.push(text(line));
     const data = await fs.readFile(s.framePath).then(b => b.toString('base64'), () => null);
     out.push(data ? { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } } : text('(frame unavailable)'));
   }
@@ -137,14 +191,15 @@ export function imagesLine(scan: ProjectScan): string {
   return `Image files available for logo overlays: ${images.length ? images.join(', ') : 'none (do not add a logo overlay)'}.`;
 }
 
-/** Every raw file with its duration, transcript and shots (each with one sampled frame). */
-export async function rawFootageBlocks(scan: ProjectScan, analysis: Record<string, FileAnalysis>): Promise<ContentBlock[]> {
-  const blocks: ContentBlock[] = [text(`# Raw footage (cut only from these files)\n\nEach shot is [index, startSec, endSec], followed by a frame from its middle.`)];
+/** Every raw file with its duration, transcript and shots; the shots `frames` selects carry a sampled frame. */
+export async function rawFootageBlocks(scan: ProjectScan, analysis: Record<string, FileAnalysis>, frames: Record<string, number[]>): Promise<ContentBlock[]> {
+  const blocks: ContentBlock[] = [text(`# Raw footage (cut only from these files)\n\nEach shot is [index, startSec, endSec], followed by a frame from its middle; `
+    + `to keep the request small, shots marked (no frame) are listed without one.`)];
   for (const m of scan.raw) {
     const a = analysis[m.path];
     const t = transcriptText(a);
     blocks.push(text(`## ${m.path}\n${m.kind}, duration ${sec(m.durationSec)}s, ${m.hasAudio ? 'has audio' : 'no audio'}${t ? `\n${t}` : ''}`));
-    blocks.push(...(await shotBlocks(a?.shots ?? [])));
+    blocks.push(...(await shotBlocks(a?.shots ?? [], frames[m.path] ?? [])));
   }
   return blocks;
 }
@@ -156,7 +211,8 @@ export async function buildPlanMessage(ctx: PlanContext): Promise<ContentBlock[]
   blocks.push(text(`# User prompt\n\n${ctx.prompt}\n\n# Reference roles\n\n${active.length ? active.map(roleLine).join('\n') : 'none'}\n\n` +
     `# Timing driver\n\n${ctx.driver} (${DRIVER_HELP[ctx.driver]})\n\n# Logo\n\n${imagesLine(ctx.scan)}`));
 
-  blocks.push(...(await rawFootageBlocks(ctx.scan, ctx.analysis)));
+  const frames = requestFrames(ctx.scan, ctx.analysis, active.filter(r => r.role === 'style').map(r => r.path));
+  blocks.push(...(await rawFootageBlocks(ctx.scan, ctx.analysis, frames)));
 
   if (active.length) blocks.push(text('# References'));
   for (const r of active) {
@@ -172,7 +228,7 @@ export async function buildPlanMessage(ctx: PlanContext): Promise<ContentBlock[]
     }
     if (r.role === 'style' && a?.cutsPerMinute != null) lines.push(`cutsPerMinute: ${sec(a.cutsPerMinute)}`);
     blocks.push(text(lines.join('\n')));
-    if (r.role === 'style') blocks.push(...(await shotBlocks(a?.shots ?? [])));
+    if (r.role === 'style') blocks.push(...(await shotBlocks(a?.shots ?? [], frames[r.path] ?? [])));
   }
 
   blocks.push(text(`${timelineFormat()}\n\nNow call submit_timeline with the complete timeline and notFollowed.`));

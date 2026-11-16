@@ -43,15 +43,33 @@ export function applyPatch(t: Timeline, ops: PatchOp[]): Timeline {
       case 'retime': {
         if (!Number.isInteger(op.durationFrames) || op.durationFrames < 1) throw new Error('invalid duration');
         const s = find(next.segments, op.segmentId);
-        const oldEnd = s.startFrame + s.durationFrames;
-        const delta = op.durationFrames - s.durationFrames;
+        const oldStart = s.startFrame;
+        const oldDuration = s.durationFrames;
+        const oldEnd = oldStart + oldDuration;
+        const newEnd = oldStart + op.durationFrames;
+        const delta = op.durationFrames - oldDuration;
+        // Shortening squeezes the segment's old range into the new one (so its captions do not overlap the next ones);
+        // frames after it move by delta. Continuous, so a caption reaching past the segment keeps its tail in place.
+        // Rounds half up in integers: (f - oldStart) * new / old, without floating-point error.
+        const squeeze = (f: number) => (f <= oldEnd
+          ? oldStart + Math.floor((2 * (f - oldStart) * op.durationFrames + oldDuration) / (2 * oldDuration)) : f + delta);
         s.durationFrames = op.durationFrames;
         s.sourceOut = s.sourceIn + (op.durationFrames / FPS) * s.speed;
         for (const other of next.segments) if (other.startFrame >= oldEnd) other.startFrame += delta;
         for (const c of next.captions) {
-          if (c.startFrame < oldEnd) continue;
-          c.startFrame += delta; c.endFrame += delta;
-          for (const w of c.words) { w.startFrame += delta; w.endFrame += delta; }
+          if (c.startFrame >= oldEnd) {
+            c.startFrame += delta; c.endFrame += delta;
+            for (const w of c.words) { w.startFrame += delta; w.endFrame += delta; }
+            continue;
+          }
+          // Captions starting before the segment stay; lengthening leaves the ones inside it untouched.
+          if (c.startFrame < oldStart || delta >= 0) continue;
+          c.startFrame = Math.min(squeeze(c.startFrame), newEnd - 1);
+          c.endFrame = Math.max(squeeze(c.endFrame), c.startFrame + 1);
+          for (const w of c.words) {
+            w.startFrame = squeeze(w.startFrame);
+            w.endFrame = Math.max(squeeze(w.endFrame), w.startFrame + 1);
+          }
         }
         next.durationFrames += delta;
         break;
@@ -106,10 +124,27 @@ function isPureShift(p: Item, n: Item): boolean {
   return isDeepStrictEqual(p, shiftedBack(n, n.startFrame - p.startFrame));
 }
 
+/** Captions starting inside a target segment whose duration changed: a retime rescales them, so they count as targets. */
+function rescaledCaptions(prev: Timeline, next: Timeline, targets: string[]): string[] {
+  const ranges = prev.segments
+    .filter((p) => targets.includes(p.id) && next.segments.find((n) => n.id === p.id)?.durationFrames !== p.durationFrames)
+    .map((p) => [p.startFrame, p.startFrame + p.durationFrames]);
+  return prev.captions.filter((c) => ranges.some(([a, b]) => a <= c.startFrame && c.startFrame < b)).map((c) => c.id);
+}
+
+/** Ids of segments, captions and audio tracks present in both whose content changed (not only moved in time as a whole), in timeline order. */
+export function changedItems(prev: Timeline, next: Timeline): string[] {
+  const groups: [Item[], Item[]][] = [[prev.segments, next.segments], [prev.captions, next.captions], [prev.audio, next.audio]];
+  return groups.flatMap(([before, after]) => after.filter((n) => {
+    const p = before.find((i) => i.id === n.id);
+    return p !== undefined && !isDeepStrictEqual(p, n) && !isPureShift(p, n);
+  }).map((n) => n.id));
+}
+
 /** Returns violations; [] means the change respects all locks. */
 export function checkLocks(prev: Timeline, next: Timeline, opts: { targets: string[]; unlock: boolean }): string[] {
   const out: string[] = [];
-  const targets = new Set(opts.targets);
+  const targets = new Set([...opts.targets, ...(opts.unlock ? rescaledCaptions(prev, next, opts.targets) : [])]);
 
   if (!opts.unlock && prev.durationFrames !== next.durationFrames) {
     out.push(`durationFrames changed (${prev.durationFrames} -> ${next.durationFrames}) without unlock`);

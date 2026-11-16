@@ -2,10 +2,10 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { execa } from 'execa';
 import { estimateCost } from '../agent/cost';
-import { fixTimeline } from '../agent/fix';
+import { fixTimeline, type FixRefusalCode } from '../agent/fix';
 import { AgentError, type AgentModel } from '../agent/model';
 import { planTimeline, type NotFollowed } from '../agent/plan';
-import { authorityPrompt, timelineFormat } from '../agent/prompt';
+import { authorityPrompt, requestFrames, timelineFormat } from '../agent/prompt';
 import { assignRoles } from '../agent/roles';
 import { analyseProject, type FileAnalysis, type Transcriber } from '../analysis';
 import { carryApprovals, setApproved } from '../core/patch';
@@ -143,15 +143,16 @@ async function ingest(p: Project, deps: JobDeps, downloads: string[], report: Re
 const downloadsIn = (roles: RoleAssignment[]) => roles.map(r => r.path).filter(x => x.startsWith('.vea/downloads/'));
 const rawAnalysis = ({ scan, analysis }: Ingested) => scan.raw.map(m => analysis[m.path]).filter((a): a is FileAnalysis => !!a);
 
-/** Rough size of the generate request (system rules, prompt, guideline, transcripts, scripts) and its frames. */
-function generateCost(s: Settings, prompt: string, guideline: string | null, roles: RoleAssignment[], ing: Ingested) {
-  const used = [...ing.scan.raw.map(m => m.path), ...roles.filter(r => r.role !== 'ignore').map(r => r.path)];
-  let frames = 0;
+/** Rough size of the generate request (system rules, prompt, guideline, transcripts, scripts) and the frames it will send. */
+export function generateCost(s: Settings, prompt: string, guideline: string | null, roles: RoleAssignment[], ing: Ingested) {
+  const active = roles.filter(r => r.role !== 'ignore');
+  const used = [...ing.scan.raw.map(m => m.path), ...active.map(r => r.path)];
+  const selected = requestFrames(ing.scan, ing.analysis, active.filter(r => r.role === 'style').map(r => r.path));
+  const frames = Object.values(selected).reduce((n, x) => n + x.length, 0);
   let textChars = authorityPrompt(guideline).length + timelineFormat().length + prompt.length;
   for (const p of used) {
     const a = ing.analysis[p];
     const role = roles.find(r => r.path === p)?.role;
-    if (a && (role === undefined || role === 'style')) frames += a.shots.length;
     if (a?.transcript && (role === undefined || role === 'narration')) textChars += a.transcript.text.length + a.transcript.words.length * 25;
   }
   for (const sc of ing.scan.references.scripts) if (roles.some(r => r.path === sc.path && r.role === 'script')) textChars += sc.text.length;
@@ -226,8 +227,8 @@ async function generate(p: Project, req: GenerateRequest, deps: JobDeps, report:
   return { videoId: req.videoId, version, notFollowed, output };
 }
 
-export type FixJobResult = { status: 'refused'; reason: string; needsUnlock: boolean }
-  | { status: 'applied'; version: number; targets: string[]; summary: string; output: Output };
+export type FixJobResult = { status: 'refused'; code: FixRefusalCode; reason: string; needsUnlock: boolean }
+  | { status: 'applied'; version: number; targets: string[]; changed: string[]; summary: string; output: Output };
 
 /** fixTimeline on the latest version; on 'applied' save a new version and render it. A refusal is a result, not a failure. */
 export function runFix(p: Project, videoId: string, req: { feedback: string; unlock: boolean }, deps: JobDeps, report: Report): Promise<FixJobResult> {
@@ -245,10 +246,10 @@ async function fix(p: Project, videoId: string, req: { feedback: string; unlock:
   report(0.25, 'Working out the fix');
   const r = await fixTimeline({ feedback: req.feedback, current: latest.timeline, guideline: await loadGuideline(p.dir), scan: ing.scan,
     analysis: ing.analysis, capabilities: engine.capabilities(), unlock: req.unlock }, deps.model(deps.settings));
-  if (r.status === 'refused') return { status: 'refused', reason: r.reason, needsUnlock: r.needsUnlock };
-  const version = await store.save(r.timeline, `fix: ${r.summary}`);
+  if (r.status === 'refused') return { status: 'refused', code: r.code, reason: r.reason, needsUnlock: r.needsUnlock };
+  const version = await store.save(r.timeline, `fix: ${r.summary} (changed: ${r.changed.join(', ')})`);
   const output = await render(p, videoId, version, r.timeline, engine, report, 0.5);
-  return { status: 'applied', version, targets: r.targets, summary: r.summary, output };
+  return { status: 'applied', version, targets: r.targets, changed: r.changed, summary: r.summary, output };
 }
 
 export type RevertJobResult = { status: 'applied'; version: number; output: Output }

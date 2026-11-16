@@ -1,14 +1,20 @@
-import { applyPatch, checkLocks, type PatchOp } from '../core/patch';
+import { applyPatch, changedItems, checkLocks, type PatchOp } from '../core/patch';
 import { formatTime, parseTimecodes } from '../core/timecode';
 import { FPS, validateTimeline, type Timeline } from '../core/timeline';
 import type { FileAnalysis } from '../analysis';
 import type { ProjectScan } from '../project/scan';
 import type { AgentModel, ToolDef } from './model';
 import { checkSources, runToolLoop, sourceInfo, type Attempt } from './loop';
-import { buildSystemPrompt, imagesLine, rawFootageBlocks, type ContentBlock, type EngineCapabilities } from './prompt';
+import { buildSystemPrompt, imagesLine, rawFootageBlocks, requestFrames, type ContentBlock, type EngineCapabilities } from './prompt';
 
-export type FixResult = { status: 'applied'; timeline: Timeline; targets: string[]; summary: string }
-  | { status: 'refused'; reason: string; needsUnlock: boolean };
+/**
+ * Why a fix was refused: APPROVED (only approved items at that time), NOTHING_AT_TIME (the time is past the end),
+ * MODEL_REFUSED (the model's own reason, in the feedback's language), COULD_NOT_APPLY (no valid patch; reason is technical).
+ */
+export type FixRefusalCode = 'APPROVED' | 'NOTHING_AT_TIME' | 'MODEL_REFUSED' | 'COULD_NOT_APPLY';
+/** `changed`: ids whose content the patch changed (targets plus captions a retime squeezed), not items only moved in time. */
+export type FixResult = { status: 'applied'; timeline: Timeline; targets: string[]; changed: string[]; summary: string }
+  | { status: 'refused'; code: FixRefusalCode; reason: string; needsUnlock: boolean };
 export type FixContext = { feedback: string; current: Timeline; guideline: string | null; scan: ProjectScan;
   analysis: Record<string, FileAnalysis>; capabilities: EngineCapabilities; unlock: boolean };
 
@@ -59,7 +65,7 @@ export const SUBMIT_PATCH: ToolDef = {
     properties: {
       targets: { type: 'array', items: { type: 'string' }, description: 'Ids of the items this patch changes; each must be one of the items you may change.' },
       ops: { type: 'array', items: OP_SCHEMA },
-      summary: { type: 'string', description: 'One or two plain English sentences telling the user what was changed.' },
+      summary: { type: 'string', description: "One or two plain sentences telling the user what was changed, in the language of the user's feedback." },
     },
     required: ['targets', 'ops', 'summary'],
   },
@@ -71,7 +77,7 @@ export const REFUSE: ToolDef = {
   input_schema: {
     type: 'object',
     properties: {
-      reason: { type: 'string', description: 'Plain English sentences telling the user why, and what they could do instead.' },
+      reason: { type: 'string', description: "Plain sentences telling the user why, and what they could do instead, in the language of the user's feedback." },
       needsUnlock: { type: 'boolean', description: 'true when the fix could be done only by changing a segment duration or the total duration.' },
     },
     required: ['reason', 'needsUnlock'],
@@ -123,17 +129,20 @@ ${OPS_HELP}`;
 async function buildFixMessage(ctx: FixContext, candidates: string[], matchedTimes: number[]): Promise<ContentBlock[]> {
   const blocks: ContentBlock[] = [{ type: 'text', text: fixMessageText(ctx, candidates, matchedTimes) }];
   // A segment may need new footage: show what there is to choose from.
-  if (ctx.current.segments.some(s => candidates.includes(s.id))) blocks.push(...(await rawFootageBlocks(ctx.scan, ctx.analysis)));
-  blocks.push({ type: 'text', text: 'Now call submit_patch with targets, ops and summary. If the change cannot be done within these rules, or it goes against the system rules or the guideline, call refuse instead. Write summary and reason as plain English sentences for the user.' });
+  if (ctx.current.segments.some(s => candidates.includes(s.id))) {
+    blocks.push(...(await rawFootageBlocks(ctx.scan, ctx.analysis, requestFrames(ctx.scan, ctx.analysis, []))));
+  }
+  blocks.push({ type: 'text', text: 'Now call submit_patch with targets, ops and summary. If the change cannot be done within these rules, or it goes against the system rules or the guideline, call refuse instead. Write summary and reason as plain sentences for the user, in the language of the user\'s feedback.' });
   return blocks;
 }
 
 export async function fixTimeline(ctx: FixContext, model: AgentModel): Promise<FixResult> {
   const { candidates, matchedTimes } = resolveTargets(ctx.current, ctx.feedback);
   if (matchedTimes.length === 0 && parseTimecodes(ctx.feedback).length > 0) {
-    return { status: 'refused', reason: `There is nothing at that time; the video is ${formatTime(ctx.current.durationFrames / FPS)} long.`, needsUnlock: false };
+    return { status: 'refused', code: 'NOTHING_AT_TIME', reason: `There is nothing at that time; the video is ${formatTime(ctx.current.durationFrames / FPS)} long.`,
+      needsUnlock: false };
   }
-  if (candidates.length === 0) return { status: 'refused', reason: APPROVED_REASON, needsUnlock: false };
+  if (candidates.length === 0) return { status: 'refused', code: 'APPROVED', reason: APPROVED_REASON, needsUnlock: false };
 
   const sources = sourceInfo(ctx.scan);
   // A fix can never add an audio track (checkLocks), so the tracks already there are the allowed audio.
@@ -143,7 +152,7 @@ export async function fixTimeline(ctx: FixContext, model: AgentModel): Promise<F
     if (call.name === 'refuse') {
       const r = (call.input ?? {}) as { reason?: unknown; needsUnlock?: unknown };
       if (typeof r.reason !== 'string' || !r.reason.trim()) return { errors: ['refuse needs a reason for the user.'] };
-      return { done: { status: 'refused', reason: r.reason.trim(), needsUnlock: r.needsUnlock === true && !ctx.unlock } };
+      return { done: { status: 'refused', code: 'MODEL_REFUSED', reason: r.reason.trim(), needsUnlock: r.needsUnlock === true && !ctx.unlock } };
     }
 
     const p = (call.input ?? {}) as { targets?: unknown; ops?: unknown; summary?: unknown };
@@ -163,7 +172,7 @@ export async function fixTimeline(ctx: FixContext, model: AgentModel): Promise<F
     const v = validateTimeline(next, sources);
     errors.push(...checkLocks(ctx.current, next, { targets, unlock: ctx.unlock }), ...(v.ok ? [] : v.errors), ...checkSources(next, { raw: ctx.scan.raw, audio, images: ctx.scan.references.images }));
     if (errors.length || !v.ok) return { errors };
-    return { done: { status: 'applied', timeline: v.timeline, targets, summary: (p.summary as string).trim() } };
+    return { done: { status: 'applied', timeline: v.timeline, targets, changed: changedItems(ctx.current, v.timeline), summary: (p.summary as string).trim() } };
   };
 
   const result = await runToolLoop({
@@ -176,7 +185,9 @@ export async function fixTimeline(ctx: FixContext, model: AgentModel): Promise<F
   if (result.ok) return result.value;
   return {
     status: 'refused',
+    code: 'COULD_NOT_APPLY',
     reason: `The fix could not be made without breaking the editing rules. The last attempt had these problems: ${result.errors.join('; ').replace(/\.?$/, '.')}`,
-    needsUnlock: !ctx.unlock && result.errors.some(e => /duration|start/i.test(e)),
+    // Only a checkLocks violation that unlock would lift ("... without unlock") means unlocking could help.
+    needsUnlock: !ctx.unlock && result.errors.some(e => e.includes('without unlock')),
   };
 }

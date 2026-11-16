@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { applyPatch, carryApprovals, checkLocks, setApproved } from '../../src/core/patch';
+import { applyPatch, carryApprovals, changedItems, checkLocks, setApproved } from '../../src/core/patch';
 import { validateTimeline } from '../../src/core/timeline';
 import { makeTimeline } from '../helpers/timeline';
 
@@ -41,7 +41,7 @@ test('setCaptionText clears words and sets animation line', () => { const a = ma
 test('retime shifts later segments and captions and updates duration', () => { const a = makeTimeline(3);
   const b = applyPatch(a, [{ op:'retime', segmentId:'s1', durationFrames:60 }]);
   expect(b.segments.map(s => s.startFrame)).toEqual([0, 60, 150]);
-  expect(b.captions.map(c => [c.startFrame, c.endFrame])).toEqual([[0, 90], [60, 150], [150, 240]]);
+  expect(b.captions.map(c => [c.startFrame, c.endFrame])).toEqual([[0, 60], [60, 150], [150, 240]]); // c1 squeezed: no overlap
   expect(b.durationFrames).toBe(240); });
 test('retime adjusts sourceOut so the timeline stays valid (R1)', () => { const a = makeTimeline(3);
   const b = applyPatch(a, [{ op:'retime', segmentId:'s2', durationFrames:45 }]);
@@ -107,3 +107,36 @@ test('carryApprovals: an approved item that differs or is missing in the old ver
   expect(carryApprovals(old, latest)).toEqual({ ok: false, conflicts: ['s2', 'c3'] });
   const shorter = structuredClone(old); shorter.captions.pop();
   expect(carryApprovals(shorter, setApproved(old, 'c3', true))).toEqual({ ok: false, conflicts: ['c3'] }); });
+
+test('shortening a segment rescales the captions that start inside it into the new range; later ones shift', () => { const a = makeTimeline(3);
+  a.captions = [
+    { id:'c1', text:'a', startFrame:90, endFrame:120, words:[{ text:'a', startFrame:90, endFrame:120 }], animation:'word', approved:false },
+    { id:'c2', text:'b', startFrame:120, endFrame:150, words:[], animation:'line', approved:false },
+    { id:'c3', text:'c', startFrame:150, endFrame:200, words:[{ text:'c', startFrame:150, endFrame:179 }, { text:'d', startFrame:179, endFrame:200 }], animation:'word', approved:false },
+    { id:'c4', text:'e', startFrame:200, endFrame:240, words:[], animation:'line', approved:false },
+  ];
+  const b = applyPatch(a, [{ op:'retime', segmentId:'s2', durationFrames:45 }]); // 90..180 -> 90..135
+  expect(b.captions.map(c => [c.id, c.startFrame, c.endFrame])).toEqual([['c1', 90, 105], ['c2', 105, 120], ['c3', 120, 155], ['c4', 155, 195]]);
+  expect(b.captions[0].words).toEqual([{ text:'a', startFrame:90, endFrame:105 }]);
+  expect(b.captions[2].words.map(w => [w.startFrame, w.endFrame])).toEqual([[120, 135], [135, 155]]);
+  expect(b.captions.every(c => c.endFrame > c.startFrame && Number.isInteger(c.startFrame) && Number.isInteger(c.endFrame))).toBe(true);
+  expect(validateTimeline(b, { 'raw/a.mp4': { durationSec: 60 } }).ok).toBe(true);
+  expect(checkLocks(a, b, { targets:['s2'], unlock:true })).toEqual([]); });
+test('a rescaled caption keeps at least 1 frame and stays inside the timeline', () => { const a = makeTimeline(1);
+  a.captions = [{ id:'c1', text:'a', startFrame:0, endFrame:1, words:[], animation:'line', approved:false },
+    { id:'c2', text:'b', startFrame:89, endFrame:90, words:[], animation:'line', approved:false }];
+  const b = applyPatch(a, [{ op:'retime', segmentId:'s1', durationFrames:3 }]);
+  expect(b.captions.map(c => [c.startFrame, c.endFrame])).toEqual([[0, 1], [2, 3]]);
+  expect(validateTimeline(b, { 'raw/a.mp4': { durationSec: 60 } }).ok).toBe(true); });
+test('lengthening leaves the captions inside the segment untouched', () => { const a = makeTimeline(3);
+  const b = applyPatch(a, [{ op:'retime', segmentId:'s2', durationFrames:120 }]);
+  expect(b.captions.map(c => [c.startFrame, c.endFrame])).toEqual([[0, 90], [90, 180], [210, 300]]); });
+test('a rescaled caption that is approved is a violation even with unlock', () => { const a = setApproved(makeTimeline(3), 'c2', true);
+  const b = applyPatch(a, [{ op:'retime', segmentId:'s2', durationFrames:45 }]);
+  expect(checkLocks(a, b, { targets:['s2'], unlock:true })).toEqual(['c2 is approved; un-approve it first']); });
+test('captions inside a segment that is not a target may not be rescaled', () => { const a = makeTimeline(3);
+  const b = applyPatch(a, [{ op:'retime', segmentId:'s2', durationFrames:45 }]);
+  expect(checkLocks(a, b, { targets:['s1'], unlock:true })).toEqual(expect.arrayContaining(['c2 changed but is not a target'])); });
+test('changedItems lists items whose content changed, not the ones only shifted', () => { const a = makeTimeline(3);
+  const b = applyPatch(a, [{ op:'retime', segmentId:'s2', durationFrames:45 }, { op:'setGain', trackId:'m1', gain:0.5 }]);
+  expect(changedItems(a, b)).toEqual(['s2', 'c2', 'm1']); });

@@ -298,7 +298,7 @@ describe('videos', () => {
     model = new FakeModel([turn('refuse', { reason: 'Cannot make it shorter without unlock.', needsUnlock: true })]);
     const j = await runJob(`${vurl()}/fix`, { feedback: 'make 0:01 shorter', unlock: false });
     expect(j.status).toBe('done');
-    expect(j.result).toEqual({ status: 'refused', reason: 'Cannot make it shorter without unlock.', needsUnlock: true });
+    expect(j.result).toEqual({ status: 'refused', code: 'MODEL_REFUSED', reason: 'Cannot make it shorter without unlock.', needsUnlock: true });
     expect((await video()).latest.n).toBe(1);
   }, 30_000);
 
@@ -308,7 +308,7 @@ describe('videos', () => {
       ops: [{ op: 'swapSource', segmentId: 's2', source: 'raw/cảnh 1.mp4', sourceIn: 2, sourceOut: 3, speed: 1 }] })]);
     const j = await runJob(`${vurl()}/fix`, { feedback: 'swap the shot at 0:01', unlock: false });
     expect(j.status, JSON.stringify(j.error)).toBe('done');
-    expect(j.result).toMatchObject({ status: 'applied', version: 2, targets: ['s2'], output: { url: expect.stringMatching(/\/v2\.mp4$/) } });
+    expect(j.result).toMatchObject({ status: 'applied', version: 2, targets: ['s2'], changed: ['s2'], output: { url: expect.stringMatching(/\/v2\.mp4$/) } });
     expect(renders.length).toBe(before + 1);
     const v = await video();
     const v1 = planned();
@@ -326,14 +326,14 @@ describe('videos', () => {
     }
     expect(renders.length).toBe(before);
     const v = await video();
-    expect(v.versions.map((x: { n: number; note: string }) => [x.n, x.note])).toEqual([[1, 'generated'], [2, 'fix: Swapped the shot.'], [3, 'approved s2'], [4, 'approved c2']]);
+    expect(v.versions.map((x: { n: number; note: string }) => [x.n, x.note])).toEqual([[1, 'generated'], [2, 'fix: Swapped the shot. (changed: s2)'], [3, 'approved s2'], [4, 'approved c2']]);
     expect(v.versions[3].output.url).toMatch(/\/v2\.mp4$/);
     expect(v.latest.timeline.segments[1].approved).toBe(true);
     expect((await post(`${vurl()}/approve`, { id: 'zz', approved: true })).statusCode).toBe(400);
 
     model = new FakeModel([]);
     const j = await runJob(`${vurl()}/fix`, { feedback: 'swap the shot at 0:01', unlock: false });
-    expect(j.result).toMatchObject({ status: 'refused', needsUnlock: false });
+    expect(j.result).toMatchObject({ status: 'refused', code: 'APPROVED', needsUnlock: false });
     expect((await video()).latest.n).toBe(4);
   }, 30_000);
 
