@@ -10,6 +10,7 @@
 - Colours: primary #FF6B35, accent #FFD23F, text #FFFFFF (replace with the brand values).
 - Font: Be Vietnam Pro.
 - Logo: small watermark bottom right for the whole video.
+- Logo file: put it in `reference/` (PNG, JPG or WebP) and name it here, e.g. `reference/logo.png`.
 - Music: light, upbeat lo-fi or acoustic, quiet under speech, a little louder in b-roll.
 - Open with a hook in the first 3 seconds, end with a clear call to follow or comment.
 - Avoid: long static shots, heavy colour grading, tiny captions, music that fights the voice.

@@ -10,6 +10,7 @@
 - Colours: primary #1F3A5F, accent #C9A24B, text #FFFFFF (replace with the brand values).
 - Font: Be Vietnam Pro.
 - Logo: small, top right, fixed for the whole video; show a larger end card in the last 2 seconds.
+- Logo file: put it in `reference/` (PNG, JPG or WebP) and name it here, e.g. `reference/logo.png`.
 - Music: soft piano or ambient, slow tempo, low in the mix under narration.
 - Lead with the best exterior or view, finish with price or contact details.
 - Avoid: shaky footage, fast cuts, loud music, flashy effects, crowded text, tilted horizons.

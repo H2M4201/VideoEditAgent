@@ -1,7 +1,9 @@
+import { randomBytes } from 'node:crypto';
 import { createReadStream, promises as fs } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
+import { resolveOnDisk } from '../../project/paths';
 
 const TYPES: Record<string, string> = {
   '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.mkv': 'video/x-matroska',
@@ -16,13 +18,16 @@ export function openServerCount(): number {
   return openServers;
 }
 
-export type MediaServer = { /** e.g. http://127.0.0.1:41234 (no trailing slash) */ url: string; close(): Promise<void> };
+export type MediaServer = { /** e.g. http://127.0.0.1:41234/<token> (no trailing slash): the base every file URL starts with */ url: string; close(): Promise<void> };
 
 /** Decodes a URL path into a file inside `root` (real path); 'outside' when it is malformed or escapes `root`, 'missing' when absent. */
 async function resolveInside(root: string, urlPath: string): Promise<string | 'outside' | 'missing'> {
   let parts: string[];
   try { parts = urlPath.split('/').filter(Boolean).map(decodeURIComponent); } catch { return 'outside'; }
   if (parts.some((p) => p === '.' || p === '..' || /[\\/\0]/.test(p))) return 'outside';
+  // Timeline paths are NFC; the file may be stored under a decomposed (NFD) name. Confinement is checked on the real path below.
+  const onDisk = path.relative(root, await resolveOnDisk(root, parts.join('/')));
+  if (onDisk !== '') parts = onDisk.split(path.sep);
   const inside = (real: string) => real === root || real.startsWith(root + path.sep);
   for (let n = parts.length; n >= 0; n -= 1) {
     let real: string;
@@ -72,18 +77,32 @@ export async function fileResponse(root: string, urlPath: string, range: string 
   return { status, headers, file, start, end, empty: st.size === 0 };
 }
 
+/** Inside the project's .vea folder a render may read only downloaded samples (never analysis, renders or settings-like state). */
+function servable(rel: string): boolean {
+  const parts = rel.split(path.sep);
+  return parts[0] !== '.vea' || (parts.length > 2 && parts[1] === 'downloads');
+}
+
 /**
- * Serves files under `rootDir` read-only on 127.0.0.1 (random free port) with HTTP Range support.
- * Requests that resolve outside the folder (including via symlinks) are refused.
+ * Serves files under `rootDir` read-only on 127.0.0.1 (random free port) with HTTP Range support, for one render.
+ * Only requests addressed to 127.0.0.1:<port> or localhost:<port> are answered (403 otherwise: DNS rebinding), and only
+ * under a random token path that is part of `url` (404 otherwise), so a web page cannot guess its way in.
+ * Requests that resolve outside the folder (including via symlinks), or into .vea/ other than .vea/downloads/, are refused.
  */
 export async function serveFolder(rootDir: string): Promise<MediaServer> {
   const root = await fs.realpath(rootDir);
+  const prefix = `/${randomBytes(16).toString('hex')}/`;
+  let hosts = new Set<string>();
   const server = http.createServer((req, res) => {
     void handle(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
   });
   async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    if (!hosts.has((req.headers.host ?? '').toLowerCase())) { res.writeHead(403); res.end(); return; }
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { Allow: 'GET, HEAD' }); res.end(); return; }
-    const r = await fileResponse(root, (req.url ?? '/').split('?')[0], req.headers.range);
+    const urlPath = (req.url ?? '/').split('?')[0];
+    if (!urlPath.startsWith(prefix)) { res.writeHead(404); res.end(); return; }
+    const r = await fileResponse(root, urlPath.slice(prefix.length - 1), req.headers.range);
+    if ('file' in r && !servable(path.relative(root, r.file))) { res.writeHead(403); res.end(); return; }
     res.writeHead(r.status, r.headers);
     if (!('file' in r) || req.method === 'HEAD' || r.empty) { res.end(); return; }
     const { file, start, end } = r;
@@ -97,9 +116,10 @@ export async function serveFolder(rootDir: string): Promise<MediaServer> {
   });
   openServers += 1;
   const { port } = server.address() as AddressInfo;
+  hosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
   let closed = false;
   return {
-    url: `http://127.0.0.1:${port}`,
+    url: `http://127.0.0.1:${port}${prefix.slice(0, -1)}`,
     close: () => new Promise<void>((resolve) => {
       if (closed) { resolve(); return; }
       closed = true;

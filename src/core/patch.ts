@@ -69,6 +69,28 @@ export function setApproved(t: Timeline, id: string, approved: boolean): Timelin
   return next;
 }
 
+/**
+ * `target`'s content with `latest`'s approvals (for going back to an older version). Every item approved in `latest` must
+ * exist in `target` with the same content; otherwise the ids of those that do not are returned as conflicts (timeline order).
+ */
+export function carryApprovals(target: Timeline, latest: Timeline):
+  { ok: true; timeline: Timeline } | { ok: false; conflicts: string[] } {
+  const approved = new Set([...latest.segments, ...latest.captions].filter((i) => i.approved).map((i) => i.id));
+  const unapproved = <T extends { approved: boolean }>(i: T): T => ({ ...i, approved: false });
+  const conflicts: string[] = [];
+  for (const [before, after] of [[latest.segments, target.segments], [latest.captions, target.captions]] as const) {
+    for (const p of before as { id: string; approved: boolean }[]) {
+      if (!p.approved) continue;
+      const n = (after as { id: string; approved: boolean }[]).find((i) => i.id === p.id);
+      if (!n || !isDeepStrictEqual(unapproved(p), unapproved(n))) conflicts.push(p.id);
+    }
+  }
+  if (conflicts.length) return { ok: false, conflicts };
+  const next = structuredClone(target);
+  for (const i of [...next.segments, ...next.captions]) i.approved = approved.has(i.id);
+  return { ok: true, timeline: next };
+}
+
 type Item = { id: string; startFrame: number; endFrame?: number; words?: { startFrame: number; endFrame: number }[] };
 
 /** Copy of an item with every frame position moved back by `delta`. */

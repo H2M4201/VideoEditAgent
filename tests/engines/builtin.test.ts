@@ -35,6 +35,15 @@ async function frameLuma(file: string, sec: number): Promise<number> {
   return Number(m[1]);
 }
 
+/** Average chroma red (VAVG) of an 80x80 crop at (x, y) of the frame at `sec`. */
+async function cropRedness(file: string, sec: number, x: number, y: number): Promise<number> {
+  const { stderr } = await execa('ffmpeg', ['-v', 'info', '-ss', String(sec), '-i', file, '-frames:v', '1',
+    '-vf', `crop=80:80:${x}:${y},signalstats,metadata=print:key=lavfi.signalstats.VAVG`, '-f', 'null', '-']);
+  const m = /VAVG=([\d.]+)/.exec(stderr);
+  if (!m) throw new Error(`no VAVG in ffmpeg output: ${stderr}`);
+  return Number(m[1]);
+}
+
 /** Mean audio volume in dB (very negative for silence). */
 async function meanVolumeDb(file: string): Promise<number> {
   const { stderr } = await execa('ffmpeg', ['-v', 'info', '-i', file, '-af', 'volumedetect', '-f', 'null', '-']);
@@ -88,6 +97,17 @@ describe('builtin engine render', () => {
     expect(await frameLuma(r.path, 1.5)).toBeGreaterThan(16);
   }, RENDER_TIMEOUT);
 
+  test('renders a logo overlay from an image in reference/', async () => {
+    await execa('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:size=128x128', '-frames:v', '1',
+      path.join(projectDir, 'reference', 'logo.png')]);
+    const timeline = twoSecondTimeline('a.mp4', 'b.mp4');
+    timeline.overlays = [{ id: 'o1', kind: 'logo', source: 'reference/logo.png', startFrame: 0, endFrame: 60, position: 'top-left' }];
+    const r = await builtinEngine.render({ projectDir, timeline, outDir, name: 'logo' });
+    // The logo is about 130 px wide at a 54 px margin; the bottom-right corner has footage only.
+    expect(await cropRedness(r.path, 1, 70, 70)).toBeGreaterThan(200);
+    expect(await cropRedness(r.path, 1, 900, 1700)).toBeLessThan(200);
+  }, RENDER_TIMEOUT);
+
   test('closes the media server when the browser fails to launch', async () => {
     const saved = process.env.VEA_BROWSER;
     process.env.VEA_BROWSER = path.join(projectDir, 'no-such-browser');
@@ -98,6 +118,14 @@ describe('builtin engine render', () => {
       if (saved === undefined) delete process.env.VEA_BROWSER; else process.env.VEA_BROWSER = saved;
     }
     expect(openServerCount()).toBe(0);
+  }, RENDER_TIMEOUT);
+
+  test('renders a source stored under a decomposed (NFD) name from its NFC timeline path', async () => {
+    const nfdDir = await makeProject({ rawNames: ['cảnh 1.mp4'.normalize('NFD'), 'b.mp4'], music: true });
+    dirs.push(nfdDir);
+    const timeline = twoSecondTimeline('cảnh 1.mp4'.normalize('NFC'), 'b.mp4');
+    const r = await builtinEngine.render({ projectDir: nfdDir, timeline, outDir: path.join(nfdDir, 'out'), name: 'nfd' });
+    expect(await frameLuma(r.path, 0.5)).toBeGreaterThan(16);
   }, RENDER_TIMEOUT);
 
   test('renders sources with Vietnamese names and spaces', async () => {
@@ -132,16 +160,21 @@ describe('media server', () => {
     proj = path.join(root, 'proj');
     await fs.mkdir(path.join(proj, 'raw'), { recursive: true });
     await fs.writeFile(path.join(proj, 'raw', 'cảnh 1.txt'), '0123456789abcdef');
+    await fs.mkdir(path.join(proj, 'thư mục'.normalize('NFD')));
+    await fs.writeFile(path.join(proj, 'thư mục'.normalize('NFD'), 'phòng.txt'.normalize('NFD')), 'NFD file');
     await fs.writeFile(path.join(root, 'secret.txt'), 'SECRET');
     await fs.symlink(path.join(root, 'secret.txt'), path.join(proj, 'link.txt'));
   });
 
+  /** Port and token path prefix of a running media server. */
+  const where = (s: { url: string }) => ({ port: Number(new URL(s.url).port), prefix: new URL(s.url).pathname });
+
   test('serves project files with Range support on loopback', async () => {
     const s = await serveFolder(proj);
     try {
-      expect(s.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
-      const port = Number(new URL(s.url).port);
-      const p = '/raw/' + encodeURIComponent('cảnh 1.txt');
+      expect(s.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{32}$/);
+      const { port, prefix } = where(s);
+      const p = prefix + '/raw/' + encodeURIComponent('cảnh 1.txt');
       const full = await rawGet(port, p);
       expect([full.status, full.body]).toEqual([200, '0123456789abcdef']);
       const part = await rawGet(port, p, { Range: 'bytes=2-5' });
@@ -149,15 +182,81 @@ describe('media server', () => {
     } finally { await s.close(); }
   });
 
+  test('serves a file stored under decomposed (NFD) names when asked for its NFC path', async () => {
+    const s = await serveFolder(proj);
+    try {
+      const { port, prefix } = where(s);
+      const p = prefix + '/' + ['thư mục', 'phòng.txt'].map(x => encodeURIComponent(x.normalize('NFC'))).join('/');
+      expect(await rawGet(port, p)).toMatchObject({ status: 200, body: 'NFD file' });
+    } finally { await s.close(); }
+  });
+
   test('refuses requests that resolve outside the project folder', async () => {
     const s = await serveFolder(proj);
     try {
-      const port = Number(new URL(s.url).port);
+      const { port, prefix } = where(s);
       for (const p of ['/../secret.txt', '/%2e%2e/secret.txt', '/raw/..%2F..%2Fsecret.txt', '/link.txt']) {
-        const r = await rawGet(port, p);
+        const r = await rawGet(port, prefix + p);
         expect(r.status, p).toBeGreaterThanOrEqual(400);
         expect(r.body).not.toContain('SECRET');
       }
+    } finally { await s.close(); }
+  });
+});
+
+describe('media server access', () => {
+  let proj: string;
+  beforeAll(async () => {
+    proj = await fs.mkdtemp(path.join(os.tmpdir(), 'vea-serve2-'));
+    dirs.push(proj);
+    await fs.mkdir(path.join(proj, 'raw'));
+    await fs.writeFile(path.join(proj, 'raw', 'a.txt'), 'A');
+    for (const d of ['analysis', 'downloads', 'videos']) {
+      await fs.mkdir(path.join(proj, '.vea', d), { recursive: true });
+      await fs.writeFile(path.join(proj, '.vea', d, 'f.mp4'), d);
+    }
+    await fs.writeFile(path.join(proj, '.vea', 'prepare.json'), '{}');
+  });
+  const where = (s: { url: string }) => ({ port: Number(new URL(s.url).port), prefix: new URL(s.url).pathname });
+
+  test('refuses a request whose Host is not 127.0.0.1 or localhost on its port (403)', async () => {
+    const s = await serveFolder(proj);
+    try {
+      const { port, prefix } = where(s);
+      for (const host of ['evil.example', `evil.example:${port}`, '127.0.0.1:1', `localhost.evil:${port}`]) {
+        const r = await rawGet(port, `${prefix}/raw/a.txt`, { Host: host });
+        expect([r.status, r.body], host).toEqual([403, '']);
+      }
+      for (const host of [`127.0.0.1:${port}`, `localhost:${port}`]) {
+        expect((await rawGet(port, `${prefix}/raw/a.txt`, { Host: host })).body, host).toBe('A');
+      }
+    } finally { await s.close(); }
+  });
+
+  test('serves only under its random token path; anything else is 404', async () => {
+    const s = await serveFolder(proj);
+    const other = await serveFolder(proj);
+    try {
+      const { port, prefix } = where(s);
+      expect(prefix).not.toBe(where(other).prefix);
+      for (const p of ['/raw/a.txt', `${where(other).prefix}/raw/a.txt`, `${prefix}raw/a.txt`, `${prefix.slice(0, -1)}/raw/a.txt`]) {
+        const r = await rawGet(port, p);
+        expect([r.status, r.body], p).toEqual([404, '']);
+      }
+      expect((await rawGet(port, `${prefix}/raw/a.txt`)).status).toBe(200);
+    } finally { await s.close(); await other.close(); }
+  });
+
+  test('inside .vea/ only downloads/ is served', async () => {
+    const s = await serveFolder(proj);
+    try {
+      const { port, prefix } = where(s);
+      for (const p of ['/.vea/analysis/f.mp4', '/.vea/videos/f.mp4', '/.vea/prepare.json']) {
+        const r = await rawGet(port, prefix + p);
+        expect(r.status, p).toBe(403);
+        expect(r.body).toBe('');
+      }
+      expect((await rawGet(port, `${prefix}/.vea/downloads/f.mp4`)).body).toBe('downloads');
     } finally { await s.close(); }
   });
 });

@@ -12,8 +12,8 @@ import { scanProject } from '../project/scan';
 import type { AppDeps } from './app';
 import { AppError, parseBody } from './errors';
 import type { Job, JobMeta, Report } from './jobs';
-import { approveItem, describeVideo, ensureFfmpeg, listVideos, preparedPaths, readVideoMeta, runFix, runGenerate, runPrepare, runRevert,
-  videoDir, type JobDeps } from './pipeline';
+import { approveItem, describeVideo, ensureFfmpeg, latestRendered, listVideos, preparedPaths, readVideoMeta, runFix, runGenerate, runPrepare,
+  runRender, runRevert, videoDir, type JobDeps } from './pipeline';
 import type { ProjectEntry } from './settings';
 
 const ROLES: [Role, ...Role[]] = ['narration', 'music', 'style', 'script', 'ignore'];
@@ -148,5 +148,12 @@ export function registerProjectRoutes(app: FastifyInstance, deps: AppDeps & { en
       throw new AppError('UNKNOWN_VERSION', `Version ${version} does not exist`);
     }
     return enqueue(reply, 'render', { projectId: p.id, videoId: vid }, (d, report) => runRevert(p, vid, version, d, report));
+  });
+
+  app.post('/api/projects/:id/videos/:vid/render', async (req, reply) => {
+    const p = await project((req.params as P).id);
+    const vid = await video(p, (req.params as P).vid);
+    if (await latestRendered(p, vid)) throw new AppError('ALREADY_RENDERED', 'The latest version already has a video', 409);
+    return enqueue(reply, 'render', { projectId: p.id, videoId: vid }, (d, report) => runRender(p, vid, d, report));
   });
 }

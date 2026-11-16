@@ -54,7 +54,7 @@ export async function planTimeline(ctx: PlanContext, model: AgentModel): Promise
       const input = (call.input ?? {}) as { timeline?: unknown; notFollowed?: unknown };
       const v = validateTimeline(input.timeline, sources);
       if (!v.ok) return { errors: v.errors };
-      const errors = checkSources(v.timeline, { raw: ctx.scan.raw, audio });
+      const errors = checkSources(v.timeline, { raw: ctx.scan.raw, audio, images: ctx.scan.references.images });
       if (errors.length) return { errors };
       const timeline: Timeline = {
         ...v.timeline,

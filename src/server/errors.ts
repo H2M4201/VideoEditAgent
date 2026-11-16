@@ -10,6 +10,16 @@ export class AppError extends Error {
 
 export const FFMPEG_MISSING_MESSAGE = 'ffmpeg/ffprobe was not found. Install ffmpeg (it includes ffprobe) and make sure it is on PATH.';
 
+export const BROWSER_UNAVAILABLE_MESSAGE = 'The video could not be rendered because the browser used for rendering could not be '
+  + 'started or downloaded. Check internet access and restart the app.';
+const BROWSER_FAILURE = /VEA_BROWSER|(launch|download)[^\n]*(browser|chrom)|(browser|chrom)[^\n]*(launch|download)/i;
+
+/** What a job throws for a render failure: a browser that cannot be launched or downloaded becomes BROWSER_UNAVAILABLE; anything else is unchanged. */
+export function renderFailure(e: unknown): unknown {
+  const message = e instanceof Error ? e.message : String(e);
+  return BROWSER_FAILURE.test(message) ? new AppError('BROWSER_UNAVAILABLE', `${BROWSER_UNAVAILABLE_MESSAGE} (${message.split('\n')[0]})`, 500) : e;
+}
+
 /** True for an execa failure to start ffmpeg or ffprobe because the program does not exist. */
 function isFfmpegMissing(e: unknown): boolean {
   const x = e as { code?: unknown; command?: unknown } | null;

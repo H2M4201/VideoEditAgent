@@ -5,7 +5,7 @@ import type { FileAnalysis } from '../analysis';
 import type { ProjectScan } from '../project/scan';
 import type { AgentModel, ToolDef } from './model';
 import { checkSources, runToolLoop, sourceInfo, type Attempt } from './loop';
-import { buildSystemPrompt, rawFootageBlocks, type ContentBlock, type EngineCapabilities } from './prompt';
+import { buildSystemPrompt, imagesLine, rawFootageBlocks, type ContentBlock, type EngineCapabilities } from './prompt';
 
 export type FixResult = { status: 'applied'; timeline: Timeline; targets: string[]; summary: string }
   | { status: 'refused'; reason: string; needsUnlock: boolean };
@@ -111,6 +111,7 @@ ${where}
 Approved (locked) items: ${approved.join(', ') || 'none'}.
 ${unlock}
 Every item the patch changes must be listed in targets. Everything else must stay exactly as it is.
+${imagesLine(ctx.scan)}
 
 # Current timeline
 
@@ -160,7 +161,7 @@ export async function fixTimeline(ctx: FixContext, model: AgentModel): Promise<F
     catch (e) { return { errors: [(e as Error).message] }; }
 
     const v = validateTimeline(next, sources);
-    errors.push(...checkLocks(ctx.current, next, { targets, unlock: ctx.unlock }), ...(v.ok ? [] : v.errors), ...checkSources(next, { raw: ctx.scan.raw, audio }));
+    errors.push(...checkLocks(ctx.current, next, { targets, unlock: ctx.unlock }), ...(v.ok ? [] : v.errors), ...checkSources(next, { raw: ctx.scan.raw, audio, images: ctx.scan.references.images }));
     if (errors.length || !v.ok) return { errors };
     return { done: { status: 'applied', timeline: v.timeline, targets, summary: (p.summary as string).trim() } };
   };

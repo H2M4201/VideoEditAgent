@@ -8,7 +8,7 @@ const media = (p: string, kind: 'video' | 'audio', durationSec = 10, hasAudio = 
 const an = (p: string, audioClass: FileAnalysis['audioClass']): FileAnalysis =>
   ({ path: p, shots: [], transcript: null, audioClass, beatsSec: [], cutsPerMinute: null });
 const scan = (refs: MediaInfo[], scripts: { path: string; text: string }[] = [], raw: MediaInfo[] = []): ProjectScan =>
-  ({ raw, references: { media: refs, scripts, links: [] }, guidelinePath: null, warnings: [] });
+  ({ raw, references: { media: refs, scripts, links: [], images: ['reference/logo.png'] }, guidelinePath: null, warnings: [] });
 const byPath = (rs: RoleAssignment[], p: string) => rs.find(r => r.path === p)!;
 
 describe('guessRoles', () => {
@@ -23,6 +23,7 @@ describe('guessRoles', () => {
     expect(byPath(rs, 'reference/s.mp4')).toMatchObject({ role: 'style', useAudio: false });
     expect(byPath(rs, 'reference/script.txt')).toMatchObject({ role: 'script', useAudio: false });
     expect(rs.every(r => r.decidedBy === 'guess' && r.reason.length > 0)).toBe(true);
+    expect(rs.map(r => r.path)).not.toContain('reference/logo.png'); // images are for logo overlays, not roles
   });
 
   it('sets useAudio false for a sample video that has audio', () => {

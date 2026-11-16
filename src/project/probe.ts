@@ -1,5 +1,5 @@
-import path from 'node:path';
 import { execa } from 'execa';
+import { resolveOnDisk } from './paths';
 
 export type MediaInfo = { path: string /*relative*/; kind: 'video' | 'audio'; durationSec: number;
   width?: number; height?: number /*after rotation*/; fps?: number; hasAudio: boolean };
@@ -22,7 +22,7 @@ function rotationOf(s: Stream): number {
 /** Probes a media file (path relative to the project folder, POSIX separators). Throws if ffprobe cannot read it. */
 export async function probeMedia(projectDir: string, relPath: string): Promise<MediaInfo> {
   const { stdout } = await execa('ffprobe', ['-v', 'error', '-of', 'json', '-show_streams', '-show_format',
-    path.join(projectDir, ...relPath.split('/'))]);
+    await resolveOnDisk(projectDir, relPath)]);
   const data = JSON.parse(stdout) as { streams?: Stream[]; format?: { duration?: string } };
   const streams = data.streams ?? [];
   const video = streams.find(s => s.codec_type === 'video' && !s.disposition?.attached_pic);

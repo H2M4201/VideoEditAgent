@@ -33,7 +33,7 @@ beforeAll(async () => {
       media: [{ path: 'reference/vo.mp3', kind: 'audio', durationSec: 12, hasAudio: true },
         { path: 'reference/song.mp3', kind: 'audio', durationSec: 60, hasAudio: true },
         { path: 'reference/sample.mp4', kind: 'video', durationSec: 30, hasAudio: true }],
-      scripts: [], links: [],
+      scripts: [], links: [], images: ['reference/logo.png'],
     },
     guidelinePath: null, warnings: [],
   };
@@ -170,5 +170,20 @@ describe('planTimeline', () => {
     const rawAudio = timeline(t => { t.audio[0].source = 'raw/a.mp4'; });
     const fake = new FakeModel([submit(rawAudio), submit(rawAudio), submit(rawAudio)]);
     await expect(planTimeline(ctx, fake)).rejects.toMatchObject({ code: 'INVALID_AFTER_RETRIES' });
+  });
+
+  it('lists image files for logo overlays; a logo naming an unknown file is rejected and fed back, a known one passes', async () => {
+    const logo = (source: string) => timeline(t => { t.overlays = [{ id: 'o1', kind: 'logo', source, startFrame: 0, endFrame: 180, position: 'bottom-right' }]; });
+    const fake = new FakeModel([submit(logo('reference/brand.png')), submit(logo('reference/logo.png'))]);
+    const out = await planTimeline(ctx, fake);
+    expect(JSON.stringify(fake.calls[0].messages)).toMatch(/image files available for logo overlays: reference\/logo\.png/i);
+    expect(JSON.stringify(fake.calls[1].messages)).toMatch(/o1.*reference\/brand\.png.*reference\/logo\.png/);
+    expect(out.timeline.overlays[0].source).toBe('reference/logo.png');
+  });
+
+  it('a title overlay needs no source', async () => {
+    const titled = timeline(t => { t.overlays = [{ id: 'o1', kind: 'title', text: 'Nhà mới', startFrame: 0, endFrame: 60, position: 'center' }]; });
+    const out = await planTimeline(ctx, new FakeModel([submit(titled)]));
+    expect(out.timeline.overlays).toHaveLength(1);
   });
 });

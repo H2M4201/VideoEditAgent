@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { applyPatch, checkLocks, setApproved } from '../../src/core/patch';
+import { applyPatch, carryApprovals, checkLocks, setApproved } from '../../src/core/patch';
 import { validateTimeline } from '../../src/core/timeline';
 import { makeTimeline } from '../helpers/timeline';
 
@@ -92,3 +92,18 @@ test('with unlock, a non-target segment that changes duration is refused', () =>
   expect(checkLocks(a, b, { targets:['s1'], unlock:true })).toContain('s3 changed but is not a target'); });
 test('retime rejects a non-integer or < 1 duration', () => { const a = makeTimeline(2);
   for (const d of [0, -30, 45.5, NaN]) expect(() => applyPatch(a, [{ op:'retime', segmentId:'s1', durationFrames:d }])).toThrow('invalid duration'); });
+
+test('carryApprovals: old content with the latest approvals', () => { const old = makeTimeline(3);
+  const latest = setApproved(setApproved(applyPatch(old, [{ op:'setCaptionText', captionId:'c3', text:'new' }]), 's1', true), 'c2', true);
+  const old2 = setApproved(old, 's2', true); // approved then, not now
+  const r = carryApprovals(old2, latest);
+  expect(r.ok).toBe(true);
+  if (!r.ok) return;
+  expect(r.timeline.captions[2].text).toBe('caption 3');
+  expect([...r.timeline.segments, ...r.timeline.captions].filter(i => i.approved).map(i => i.id)).toEqual(['s1', 'c2']); });
+test('carryApprovals: an approved item that differs or is missing in the old version is a conflict', () => { const old = makeTimeline(3);
+  let latest = applyPatch(old, [{ op:'setCaptionText', captionId:'c3', text:'new' }, { op:'setCrop', segmentId:'s2', crop:'contain' }]);
+  latest = setApproved(setApproved(setApproved(latest, 'c3', true), 's2', true), 's1', true);
+  expect(carryApprovals(old, latest)).toEqual({ ok: false, conflicts: ['s2', 'c3'] });
+  const shorter = structuredClone(old); shorter.captions.pop();
+  expect(carryApprovals(shorter, setApproved(old, 'c3', true))).toEqual({ ok: false, conflicts: ['c3'] }); });

@@ -26,6 +26,7 @@ let queue: JobQueue;
 let app: FastifyInstance;
 let model = new FakeModel([]);
 let transcribeError: Error | null = null;
+let renderError: Error | null = null;
 const renders: string[] = [];
 
 const fakeTranscriber: Transcriber = {
@@ -40,6 +41,7 @@ const stubEngine: Engine = {
   capabilities: () => structuredClone(CAPS),
   availability: async () => ({ available: true }),
   async render(o) {
+    if (renderError) throw renderError;
     const file = path.join(o.outDir, `${o.name}.mp4`);
     await fs.mkdir(o.outDir, { recursive: true });
     await fs.writeFile(file, `render of ${o.name}`);
@@ -288,7 +290,7 @@ describe('videos', () => {
     expect(v.versions).toEqual([expect.objectContaining({ n: 1, note: 'generated', output: { url: `/media/${projectId}/.vea/videos/${videoId}/v1.mp4`, path: expect.any(String) } })]);
     expect(v.latest.n).toBe(1);
     expect(v.latest.timeline).toEqual(planned());
-    expect([v.engine, v.prompt]).toEqual(['builtin', '45s tour']);
+    expect([v.engine, v.prompt, v.notFollowed]).toEqual(['builtin', '45s tour', []]);
     expect((await get(`/api/projects/${projectId}/videos/nope`)).statusCode).toBe(404);
   });
 
@@ -342,15 +344,28 @@ describe('videos', () => {
     expect(v.latest.timeline.captions[1].approved).toBe(false);
   });
 
-  test('revert saves the old timeline (with its approvals) as the newest version and renders it', async () => {
+  test('revert is refused while an item approved now differs in that version; nothing is saved', async () => {
     const before = renders.length;
     const j = await runJob(`${vurl()}/revert`, { version: 1 });
     expect(j.status, JSON.stringify(j.error)).toBe('done');
-    expect(j.result).toMatchObject({ version: 6, output: { url: expect.stringMatching(/\/v6\.mp4$/) } });
+    expect(j.result).toEqual({ status: 'refused', code: 'APPROVED_CONFLICT', ids: ['s2'] });
+    expect(renders.length).toBe(before);
+    expect((await video()).latest.n).toBe(5);
+  }, 30_000);
+
+  test('revert saves the old content with the latest approvals as the newest version and renders it', async () => {
+    await post(`${vurl()}/approve`, { id: 's1', approved: true }); // v6: s1 is the same in v1
+    await post(`${vurl()}/approve`, { id: 's2', approved: false }); // v7
+    const before = renders.length;
+    const j = await runJob(`${vurl()}/revert`, { version: 1 });
+    expect(j.status, JSON.stringify(j.error)).toBe('done');
+    expect(j.result).toMatchObject({ status: 'applied', version: 8, output: { url: expect.stringMatching(/\/v8\.mp4$/) } });
     expect(renders.length).toBe(before + 1);
     const v = await video();
     expect(v.versions.at(-1).note).toBe('reverted to v1');
-    expect(v.latest.timeline).toEqual(planned());
+    const expected = planned();
+    expected.segments[0].approved = true;
+    expect(v.latest.timeline).toEqual(expected);
     expect((await post(`${vurl()}/revert`, { version: 99 })).statusCode).toBe(400);
   }, 30_000);
 
@@ -358,12 +373,12 @@ describe('videos', () => {
     const ids = ['s1', 's3', 'c1', 'c3', 's2'];
     const res = await Promise.all(ids.map(id => post(`${vurl()}/approve`, { id, approved: true })));
     expect(res.map(r => r.statusCode)).toEqual(ids.map(() => 200));
-    expect(res.map(r => r.json().version).sort((a: number, b: number) => a - b)).toEqual([7, 8, 9, 10, 11]);
+    expect(res.map(r => r.json().version).sort((a: number, b: number) => a - b)).toEqual([9, 10, 11, 12, 13]);
     const v = await video();
-    expect(v.versions.map((x: { n: number }) => x.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(v.versions.map((x: { n: number }) => x.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
     const t = v.latest.timeline as Timeline;
     for (const id of ids) expect([...t.segments, ...t.captions].find(i => i.id === id)?.approved, id).toBe(true);
-    expect(v.versions[10].output.url).toMatch(/\/v6\.mp4$/);
+    expect(v.versions[12].output.url).toMatch(/\/v8\.mp4$/);
   });
 
   test('approve is refused while a job for that video is waiting', async () => {
@@ -382,16 +397,54 @@ describe('videos', () => {
 
 describe('video list', () => {
   test('GET videos lists videos newest first with their latest version and output', async () => {
-    model = new FakeModel([turn('submit_timeline', { timeline: planned(), notFollowed: [] })]);
+    const nf = [{ instruction: 'use a red logo', source: 'prompt', reason: 'The guideline asks for a white logo.' }];
+    model = new FakeModel([turn('submit_timeline', { timeline: planned(), notFollowed: nf })]);
     const j = await runJob(`/api/projects/${projectId}/videos`, { prompt: 'second take', roles, engine: 'builtin' });
     const second = (j.result as { videoId: string }).videoId;
     const list = (await get(`/api/projects/${projectId}/videos`)).json();
     expect(list.map((x: { videoId: string }) => x.videoId)).toEqual([second, videoId]);
-    expect(list[0]).toEqual({ videoId: second, prompt: 'second take', engine: 'builtin', createdAt: expect.any(String), latestVersion: 1,
+    expect(list[0]).toEqual({ videoId: second, prompt: 'second take', engine: 'builtin', createdAt: expect.any(String), latestVersion: 1, notFollowed: nf,
       output: { url: `/media/${projectId}/.vea/videos/${second}/v1.mp4`, path: expect.any(String) } });
-    expect(list[1]).toMatchObject({ videoId, prompt: '45s tour', latestVersion: 11, output: { url: expect.stringMatching(/\/v6\.mp4$/) } });
+    expect(list[1]).toMatchObject({ videoId, prompt: '45s tour', latestVersion: 13, output: { url: expect.stringMatching(/\/v8\.mp4$/) } });
+    expect(list[1].notFollowed).toEqual([]);
+    expect((await get(`/api/projects/${projectId}/videos/${second}`)).json().notFollowed).toEqual(nf);
     expect((await get('/api/projects/ffffffff/videos')).statusCode).toBe(404);
   }, 30_000);
+});
+
+describe('render again', () => {
+  test('a render that cannot launch the browser fails with BROWSER_UNAVAILABLE; POST render renders the latest version once', async () => {
+    model = new FakeModel([turn('submit_timeline', { timeline: planned(), notFollowed: [] })]);
+    renderError = new Error('Failed to launch the browser process!\n/usr/bin/chrome: not found');
+    let j: Job;
+    try { j = await runJob(`/api/projects/${projectId}/videos`, { prompt: 'third take', roles, engine: 'builtin' }); }
+    finally { renderError = null; }
+    expect([j.status, j.error?.code]).toEqual(['failed', 'BROWSER_UNAVAILABLE']);
+    expect(j.error?.message).toMatch(/internet/i);
+    const url = `/api/projects/${projectId}/videos/${j.videoId}`;
+    const before = (await get(url)).json();
+    expect([before.latest.n, before.versions[0].output]).toEqual([1, null]);
+
+    const again = await runJob(`${url}/render`, {});
+    expect(again.status, JSON.stringify(again.error)).toBe('done');
+    expect(again.result).toMatchObject({ version: 1, output: { url: expect.stringMatching(/\/v1\.mp4$/) } });
+    const after = (await get(url)).json();
+    expect(after.versions.map((v: { n: number }) => v.n)).toEqual([1]);
+    expect(after.versions[0].output.url).toMatch(/\/v1\.mp4$/);
+
+    const twice = await post(`${url}/render`, {});
+    expect([twice.statusCode, twice.json().error.code]).toEqual([409, 'ALREADY_RENDERED']);
+  }, 30_000);
+
+  test('other render failures keep their own error', async () => {
+    const { toJobError } = await import('../../src/server/errors');
+    const { renderFailure } = await import('../../src/server/errors');
+    expect(toJobError(renderFailure(new Error('disk full'))).code).toBe('INTERNAL');
+    for (const m of ["VEA_BROWSER is set to '/x' but that file does not exist", 'Could not download the browser: getaddrinfo ENOTFOUND',
+      'Failed to launch the browser process', 'Error while downloading Chrome Headless Shell']) {
+      expect(toJobError(renderFailure(new Error(m))).code, m).toBe('BROWSER_UNAVAILABLE');
+    }
+  });
 });
 
 describe('jobs', () => {
@@ -433,6 +486,12 @@ describe('media', () => {
     const part = await get(`/media/${projectId}/raw/c%E1%BA%A3nh%201.mp4`, { range: 'bytes=0-9' });
     expect([part.statusCode, part.rawPayload.length]).toEqual([206, 10]);
     expect(part.headers['content-range']).toMatch(/^bytes 0-9\//);
+  });
+
+  test('serves a file stored under a decomposed (NFD) name at its NFC URL', async () => {
+    await fs.writeFile(path.join(proj, 'reference', 'phòng.txt'.normalize('NFD')), 'NFD');
+    const r = await get(`/media/${projectId}/reference/${encodeURIComponent('phòng.txt'.normalize('NFC'))}`);
+    expect([r.statusCode, r.body]).toEqual([200, 'NFD']);
   });
 
   test('every /media response is sandboxed; SVG is a download', async () => {

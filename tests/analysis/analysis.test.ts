@@ -87,4 +87,24 @@ describe('analyseProject', () => {
     expect(out['raw/two.mp4'].cutsPerMinute).toBeNull();
     expect(progress.at(-1)).toBe(Object.keys(out).length);
   });
+
+  it('analyses a file stored under a decomposed (NFD) name through its NFC path', async () => {
+    const d = await fs.mkdtemp(path.join(os.tmpdir(), 'vea-an-nfd-'));
+    try {
+      await fs.mkdir(path.join(d, 'raw'));
+      await makeTwoSceneVideo(path.join(d, 'raw', 'cảnh 1.mp4'.normalize('NFD')), 'sine');
+      const scan = await scanProject(d);
+      const rel = 'raw/cảnh 1.mp4'.normalize('NFC');
+      expect(scan.raw.map(m => m.path)).toEqual([rel]);
+      const seen: string[] = [];
+      const t: Transcriber = { async transcribe(abs) { seen.push(abs); await fs.access(abs); return half; } };
+      const out = await analyseProject(d, scan, { transcriber: t });
+      expect(out[rel].shots).toHaveLength(2);
+      expect(out[rel].audioClass).toBe('speech');
+      expect(seen).toHaveLength(1);
+      // cached on the second run
+      expect((await analyseProject(d, scan, { transcriber: t }))[rel].shots).toHaveLength(2);
+      expect(seen).toHaveLength(1);
+    } finally { await fs.rm(d, { recursive: true, force: true }); }
+  });
 });

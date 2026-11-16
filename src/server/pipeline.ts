@@ -8,7 +8,7 @@ import { planTimeline, type NotFollowed } from '../agent/plan';
 import { authorityPrompt, timelineFormat } from '../agent/prompt';
 import { assignRoles } from '../agent/roles';
 import { analyseProject, type FileAnalysis, type Transcriber } from '../analysis';
-import { setApproved } from '../core/patch';
+import { carryApprovals, setApproved } from '../core/patch';
 import type { Timeline } from '../core/timeline';
 import { VersionStore } from '../core/versions';
 import type { Engine } from '../engines/types';
@@ -17,7 +17,7 @@ import { downloadLinks, type LinkResult } from '../project/links';
 import { probeMedia } from '../project/probe';
 import { guessRoles, pickTimingDriver, type RoleAssignment, type TimingDriver } from '../project/roles';
 import { scanProject, type ProjectScan } from '../project/scan';
-import { AppError, FFMPEG_MISSING_MESSAGE } from './errors';
+import { AppError, FFMPEG_MISSING_MESSAGE, renderFailure } from './errors';
 import type { Report } from './jobs';
 import type { ProjectEntry, Settings } from './settings';
 
@@ -84,6 +84,7 @@ const vea = (dir: string, ...rest: string[]) => path.join(dir, '.vea', ...rest);
 export const videoDir = (dir: string, videoId: string) => vea(dir, 'videos', videoId);
 
 type VideoMeta = { engine: string; prompt: string; roles: RoleAssignment[]; createdAt: string;
+  /** prompt instructions the plan did not follow (absent in videos made before it was stored) */ notFollowed?: NotFollowed[];
   /** version number -> absolute path of the render that version shows */ outputs: Record<string, string> };
 
 export async function readVideoMeta(dir: string, videoId: string): Promise<VideoMeta | null> {
@@ -195,7 +196,7 @@ export async function runPrepare(p: Project, prompt: string, deps: JobDeps, repo
 async function render(p: Project, videoId: string, n: number, timeline: Timeline, engine: Engine, report: Report, from: number): Promise<Output> {
   report(from, 'Rendering');
   const r = await engine.render({ projectDir: p.dir, timeline, outDir: videoDir(p.dir, videoId), name: `v${n}`,
-    onProgress: x => report(from + (1 - from) * x, 'Rendering') });
+    onProgress: x => report(from + (1 - from) * x, 'Rendering') }).catch((e: unknown) => { throw renderFailure(e); });
   await setOutput(p.dir, videoId, n, r.path);
   return outputOf(p, r.path);
 }
@@ -218,7 +219,8 @@ async function generate(p: Project, req: GenerateRequest, deps: JobDeps, report:
   const { timeline, notFollowed } = await planTimeline({ prompt: req.prompt, guideline: await loadGuideline(p.dir), scan: ing.scan,
     analysis: ing.analysis, roles: req.roles, driver: pickTimingDriver(req.roles, rawAnalysis(ing)), capabilities: engine.capabilities() },
   deps.model(deps.settings));
-  await writeVideoMeta(p.dir, req.videoId, { engine: req.engine, prompt: req.prompt, roles: req.roles, createdAt: new Date().toISOString(), outputs: {} });
+  await writeVideoMeta(p.dir, req.videoId, { engine: req.engine, prompt: req.prompt, roles: req.roles, createdAt: new Date().toISOString(),
+    notFollowed, outputs: {} });
   const version = await new VersionStore(videoDir(p.dir, req.videoId)).save(timeline, 'generated');
   const output = await render(p, req.videoId, version, timeline, engine, report, 0.5);
   return { videoId: req.videoId, version, notFollowed, output };
@@ -249,18 +251,43 @@ async function fix(p: Project, videoId: string, req: { feedback: string; unlock:
   return { status: 'applied', version, targets: r.targets, summary: r.summary, output };
 }
 
-/** Saves version `n`'s timeline (approvals as they were then) as the newest version and renders it. */
-export function runRevert(p: Project, videoId: string, n: number, deps: JobDeps, report: Report): Promise<{ version: number; output: Output }> {
+export type RevertJobResult = { status: 'applied'; version: number; output: Output }
+  | { status: 'refused'; code: 'APPROVED_CONFLICT'; ids: string[] };
+
+/**
+ * Saves version `n`'s content with the latest version's approvals as the newest version and renders it. Refused (nothing
+ * saved) when an item approved in the latest version is missing or different in version `n`: approved items never change.
+ */
+export function runRevert(p: Project, videoId: string, n: number, deps: JobDeps, report: Report): Promise<RevertJobResult> {
   return withVideoLock(p, videoId, () => revert(p, videoId, n, deps, report));
 }
 
-async function revert(p: Project, videoId: string, n: number, deps: JobDeps, report: Report): Promise<{ version: number; output: Output }> {
+async function revert(p: Project, videoId: string, n: number, deps: JobDeps, report: Report): Promise<RevertJobResult> {
   const meta = (await readVideoMeta(p.dir, videoId))!;
   const store = new VersionStore(videoDir(p.dir, videoId));
-  const timeline = await store.load(n);
-  const version = await store.save(timeline, `reverted to v${n}`);
-  const output = await render(p, videoId, version, timeline, deps.engines(meta.engine), report, 0.05);
-  return { version, output };
+  const latest = (await store.latest())!;
+  const r = carryApprovals(await store.load(n), latest.timeline);
+  if (!r.ok) return { status: 'refused', code: 'APPROVED_CONFLICT', ids: r.conflicts };
+  const version = await store.save(r.timeline, `reverted to v${n}`);
+  const output = await render(p, videoId, version, r.timeline, deps.engines(meta.engine), report, 0.05);
+  return { status: 'applied', version, output };
+}
+
+/** True when the latest version of the video has a render. */
+export async function latestRendered(p: Project, videoId: string): Promise<boolean> {
+  const latest = await new VersionStore(videoDir(p.dir, videoId)).latest();
+  return !!latest && !!(await readVideoMeta(p.dir, videoId))?.outputs[latest.n];
+}
+
+/** Renders the latest version when it has no video yet (a failed render); no new version. ALREADY_RENDERED (409) when it has one. */
+export function runRender(p: Project, videoId: string, deps: JobDeps, report: Report): Promise<{ version: number; output: Output }> {
+  return withVideoLock(p, videoId, async () => {
+    if (await latestRendered(p, videoId)) throw new AppError('ALREADY_RENDERED', 'The latest version already has a video', 409);
+    const meta = (await readVideoMeta(p.dir, videoId))!;
+    const latest = (await new VersionStore(videoDir(p.dir, videoId)).latest())!;
+    const output = await render(p, videoId, latest.n, latest.timeline, deps.engines(meta.engine), report, 0.05);
+    return { version: latest.n, output };
+  });
 }
 
 /** Sets an approval on the latest timeline and saves it as a new version that shows the previous render (no re-render). */
@@ -285,7 +312,8 @@ export async function describeVideo(p: Project, videoId: string) {
   if (!meta) return null;
   const store = new VersionStore(videoDir(p.dir, videoId));
   const versions = (await store.list()).map(v => ({ ...v, output: meta.outputs[v.n] ? outputOf(p, meta.outputs[v.n]) : null }));
-  return { videoId, engine: meta.engine, prompt: meta.prompt, roles: meta.roles, versions, latest: await store.latest() };
+  return { videoId, engine: meta.engine, prompt: meta.prompt, roles: meta.roles, notFollowed: meta.notFollowed ?? [], versions,
+    latest: await store.latest() };
 }
 
 /** The project's videos, newest first, each with its latest version and the render that version shows. */
@@ -298,7 +326,8 @@ export async function listVideos(p: Project) {
     const versions = await new VersionStore(videoDir(p.dir, videoId)).list();
     const latestVersion = versions.at(-1)?.n ?? null;
     const file = latestVersion === null ? undefined : meta.outputs[latestVersion];
-    out.push({ videoId, prompt: meta.prompt, engine: meta.engine, createdAt: meta.createdAt, latestVersion, output: file ? outputOf(p, file) : null });
+    out.push({ videoId, prompt: meta.prompt, engine: meta.engine, createdAt: meta.createdAt, latestVersion, notFollowed: meta.notFollowed ?? [],
+      output: file ? outputOf(p, file) : null });
   }
   return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : a.videoId < b.videoId ? 1 : -1));
 }

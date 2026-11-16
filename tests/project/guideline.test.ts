@@ -28,6 +28,7 @@ describe('createFromStarter', () => {
       const text = fs.readFileSync(path.join(dir, 'guideline.md'), 'utf8');
       for (const h of headings[lang]) expect(text).toContain(h);
       expect(text).toContain('Be Vietnam Pro');
+      expect(text).toMatch(/logo[^\n]*`reference\/`[^\n]*`reference\/logo\.png`/i);
       expect(text.split('\n').length).toBeGreaterThanOrEqual(25);
     });
   }

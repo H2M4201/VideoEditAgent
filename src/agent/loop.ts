@@ -54,8 +54,8 @@ export async function runToolLoop<T>(o: {
   return { ok: false, errors: lastErrors };
 }
 
-/** App-level checks validateTimeline cannot know: segments come from raw/, audio only from the allowed files. */
-export function checkSources(t: Timeline, allowed: { raw: MediaInfo[]; audio: string[] }): string[] {
+/** App-level checks validateTimeline cannot know: segments come from raw/, audio only from the allowed files, logos from reference/ images. */
+export function checkSources(t: Timeline, allowed: { raw: MediaInfo[]; audio: string[]; images: string[] }): string[] {
   const raw = new Set(allowed.raw.map(m => m.path));
   const audioOk = new Set(allowed.audio);
   const errors: string[] = [];
@@ -65,6 +65,11 @@ export function checkSources(t: Timeline, allowed: { raw: MediaInfo[]; audio: st
   for (const a of t.audio) {
     if (!audioOk.has(a.source)) {
       errors.push(`audio ${a.id}: source ${a.source} may not be used as audio; allowed: ${[...audioOk].join(', ') || 'none'} (clip sound goes through segment clipGain)`);
+    }
+  }
+  for (const o of t.overlays) {
+    if (o.kind === 'logo' && (o.source === undefined || !allowed.images.includes(o.source))) {
+      errors.push(`overlay ${o.id}: logo source ${o.source ?? '(none)'} is not an image file in reference/; available: ${allowed.images.join(', ') || 'none (use no logo overlay)'}`);
     }
   }
   return errors;

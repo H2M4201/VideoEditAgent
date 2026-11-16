@@ -40,15 +40,26 @@ test('reads guideline, scripts, links; ignores .vea and other files', async () =
   await fs.writeFile(path.join(ref, 'sub.srt'), '1\n');
   await fs.writeFile(path.join(ref, 'links.txt'), '# c\nhttps://a.example/v\n\nnotalink\nhttp://b.example\n');
   await fs.writeFile(path.join(ref, 'pic.png'), 'x');
+  await fs.writeFile(path.join(ref, 'Logo.JPG'), 'x');
+  await fs.writeFile(path.join(ref, 'b.webp'), 'x');
+  await fs.writeFile(path.join(ref, 'c.jpeg'), 'x');
+  await fs.writeFile(path.join(ref, 'd.gif'), 'x');
   await fs.mkdir(path.join(d, '.vea')); await fs.writeFile(path.join(d, '.vea', 'x.mp4'), 'x');
   const s = await scanProject(d);
   expect(s.guidelinePath).toBe('guideline.md');
   expect(s.references.scripts).toEqual([{ path: 'reference/script.txt', text: 'Xin chào' }, { path: 'reference/sub.srt', text: '1\n' }]);
   expect(s.references.links).toEqual(['https://a.example/v', 'http://b.example']);
   expect(s.references.media.map(m => m.path)).toEqual(['reference/track.mp3']);
+  expect(s.references.images).toEqual(['reference/Logo.JPG', 'reference/b.webp', 'reference/c.jpeg', 'reference/pic.png']);
   expect(s.warnings).toEqual([]); });
 test('probeMedia reports audio-less video', async () => { const d = await track(makeProject());
   const out = path.join(d, 'raw', 'mute.mp4');
   const { execa } = await import('execa');
   await execa('ffmpeg', ['-y', '-v', 'error', '-i', path.join(d, 'raw', 'a.mp4'), '-an', '-c:v', 'copy', out]);
   expect((await probeMedia(d, 'raw/mute.mp4')).hasAudio).toBe(false); });
+test('raw files that all fail to probe are NO_RAW_FOOTAGE, naming each file', async () => {
+  const d = await tmp(); await fs.mkdir(path.join(d, 'raw'));
+  await fs.writeFile(path.join(d, 'raw', 'bad1.mp4'), 'garbage'); await fs.writeFile(path.join(d, 'raw', 'bad2.mov'), 'garbage');
+  const err = await scanProject(d).catch((e: unknown) => e) as { code?: string; message?: string };
+  expect(err.code).toBe('NO_RAW_FOOTAGE');
+  expect(err.message).toContain('raw/bad1.mp4'); expect(err.message).toContain('raw/bad2.mov'); });

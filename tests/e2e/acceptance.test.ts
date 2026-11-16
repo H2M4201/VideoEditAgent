@@ -137,11 +137,16 @@ describe('acceptance (spec section 6)', () => {
     expect((await store.latest())!.timeline).toEqual(before.timeline);
   }, TIMEOUT);
 
-  test('revert restores version 1 content as a new version', async () => {
+  test('revert never changes an approved item: refused while s2 is approved, applied after un-approving it', async () => {
     const lastBefore = (await store.latest())!.n;
+    const refused = await runJob(`${videoUrl()}/revert`, { version: 1 });
+    expect(refused.result).toEqual({ status: 'refused', code: 'APPROVED_CONFLICT', ids: ['s2'] });
+    expect((await store.latest())!.n).toBe(lastBefore);
+
+    expect((await post(`${videoUrl()}/approve`, { id: 's2', approved: false })).statusCode).toBe(200);
     const rev = await runJob(`${videoUrl()}/revert`, { version: 1 });
     const { version } = rev.result as { version: number };
-    expect(version).toBe(lastBefore + 1);
+    expect(version).toBe(lastBefore + 2);
     const v3 = await store.load(version);
     expect(v3.segments).toEqual(v1.segments);
     expect(await exists(path.join(proj, '.vea', 'videos', videoId, `v${version}.mp4`))).toBe(true);

@@ -94,6 +94,7 @@ Only transitions, effects and caption animations listed under engine capabilitie
 - The first segment's transitionIn is { "type": "cut", "frames": 0 }; every transitionIn.frames is less than its segment's durationFrames.
 - Captions lie within [0, durationFrames] with endFrame > startFrame; word frames are timeline frames.
 - Audio tracks may use only the narration file, the music file, or a style reference whose role says useAudio: true. Original clip sound is controlled by segment clipGain (0 = muted).
+- A logo overlay's source must be one of the image files listed for logo overlays; a title overlay has text and no source.
 - Every segment and caption has "approved": false.
 - Style: where the guideline says nothing, use ${JSON.stringify(DEFAULT_STYLE)}.
 
@@ -130,6 +131,12 @@ function roleLine(r: RoleAssignment): string {
   return `- ${r.path}: ${r.role}${r.role === 'style' ? `, useAudio: ${r.useAudio}` : ''} (decided by ${r.decidedBy}: ${r.reason})`;
 }
 
+/** The reference images a logo overlay may use. */
+export function imagesLine(scan: ProjectScan): string {
+  const images = scan.references.images;
+  return `Image files available for logo overlays: ${images.length ? images.join(', ') : 'none (do not add a logo overlay)'}.`;
+}
+
 /** Every raw file with its duration, transcript and shots (each with one sampled frame). */
 export async function rawFootageBlocks(scan: ProjectScan, analysis: Record<string, FileAnalysis>): Promise<ContentBlock[]> {
   const blocks: ContentBlock[] = [text(`# Raw footage (cut only from these files)\n\nEach shot is [index, startSec, endSec], followed by a frame from its middle.`)];
@@ -147,7 +154,7 @@ export async function buildPlanMessage(ctx: PlanContext): Promise<ContentBlock[]
   const blocks: ContentBlock[] = [];
   const active = ctx.roles.filter(r => r.role !== 'ignore');
   blocks.push(text(`# User prompt\n\n${ctx.prompt}\n\n# Reference roles\n\n${active.length ? active.map(roleLine).join('\n') : 'none'}\n\n` +
-    `# Timing driver\n\n${ctx.driver} (${DRIVER_HELP[ctx.driver]})`));
+    `# Timing driver\n\n${ctx.driver} (${DRIVER_HELP[ctx.driver]})\n\n# Logo\n\n${imagesLine(ctx.scan)}`));
 
   blocks.push(...(await rawFootageBlocks(ctx.scan, ctx.analysis)));
 

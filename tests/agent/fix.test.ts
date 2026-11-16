@@ -24,7 +24,7 @@ beforeAll(async () => {
   await fs.writeFile(framePath, JPEG);
   const scan: ProjectScan = {
     raw: [{ path: 'raw/a.mp4', kind: 'video', durationSec: 60, hasAudio: true }, { path: 'raw/b.mp4', kind: 'video', durationSec: 20, hasAudio: false }],
-    references: { media: [{ path: 'reference/sample.mp4', kind: 'video', durationSec: 30, hasAudio: true }], scripts: [], links: [] },
+    references: { media: [{ path: 'reference/sample.mp4', kind: 'video', durationSec: 30, hasAudio: true }], scripts: [], links: [], images: ['reference/logo.png'] },
     guidelinePath: null, warnings: [],
   };
   const analysis: Record<string, FileAnalysis> = {
@@ -209,6 +209,7 @@ describe('fixTimeline', () => {
     expect(m).toMatch(/s3, c3/);
     expect(m).toContain('raw/b.mp4');
     expect(m).toContain('[1, 9, 20]');
+    expect(m).toMatch(/image files available for logo overlays: reference\/logo\.png/i);
     expect(m).toContain('image/jpeg');
     expect(m).not.toContain('video/mp4');
   });
