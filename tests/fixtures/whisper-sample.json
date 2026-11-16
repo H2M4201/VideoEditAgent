@@ -1,0 +1,36 @@
+{
+  "systeminfo": "fixture",
+  "model": { "type": "base" },
+  "params": { "language": "auto" },
+  "result": { "language": "vi" },
+  "transcription": [
+    {
+      "timestamps": { "from": "00:00:00,000", "to": "00:00:02,000" },
+      "offsets": { "from": 0, "to": 2000 },
+      "text": " Xin chào các bạn",
+      "tokens": [
+        { "text": "[_BEG_]", "offsets": { "from": 0, "to": 0 } },
+        { "text": " Xin", "offsets": { "from": 100, "to": 400 } },
+        { "text": " chào", "offsets": { "from": 400, "to": 800 } },
+        { "text": " các", "offsets": { "from": 800, "to": 1100 } },
+        { "text": " bạ", "offsets": { "from": 1100, "to": 1500 } },
+        { "text": "n", "offsets": { "from": 1500, "to": 1900 } },
+        { "text": "[_TT_100]", "offsets": { "from": 2000, "to": 2000 } }
+      ]
+    },
+    {
+      "timestamps": { "from": "00:00:02,000", "to": "00:00:04,500" },
+      "offsets": { "from": 2000, "to": 4500 },
+      "text": " Hôm nay chúng ta đi Đà Nẵng",
+      "tokens": [
+        { "text": " Hôm", "offsets": { "from": 2100, "to": 2500 } },
+        { "text": " nay", "offsets": { "from": 2500, "to": 2900 } },
+        { "text": " chúng", "offsets": { "from": 2900, "to": 3300 } },
+        { "text": " ta", "offsets": { "from": 3300, "to": 3500 } },
+        { "text": " đi", "offsets": { "from": 3500, "to": 3800 } },
+        { "text": " Đà", "offsets": { "from": 3800, "to": 4100 } },
+        { "text": " Nẵng", "offsets": { "from": 4100, "to": 4500 } }
+      ]
+    }
+  ]
+}
