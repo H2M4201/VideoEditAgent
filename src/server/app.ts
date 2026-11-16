@@ -1,4 +1,5 @@
 import { createReadStream, promises as fs } from 'node:fs';
+import path from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import type { execa } from 'execa';
 import { z } from 'zod';
@@ -28,6 +29,12 @@ const SettingsPatch = z.object({
 
 const sendError = (reply: FastifyReply, status: number, code: string, message: string) => reply.code(status).send({ error: { code, message } });
 const publicSettings = (s: Settings) => ({ ...s, apiKey: maskApiKey(s.apiKey) });
+
+/** Inside a project's .vea folder only renders and downloaded samples are served (not analysis, settings-like state). */
+function servable(rel: string): boolean {
+  const parts = rel.split(path.sep);
+  return parts[0] !== '.vea' || (parts.length > 2 && (parts[1] === 'videos' || parts[1] === 'downloads'));
+}
 
 function hostnameOf(host: string): string {
   try { return new URL(`http://${host}`).hostname; } catch { return ''; }
@@ -95,13 +102,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     // Use the raw (still encoded) path so encoded traversal is judged after decoding, part by part.
     const urlPath = (req.raw.url ?? '').split('?')[0];
     const rest = urlPath.slice(urlPath.indexOf('/', '/media/'.length));
-    const r = await fileResponse(await fs.realpath(project.dir), rest, req.headers.range);
+    // Served files share the API's origin: never let one run script (e.g. an SVG) or be sniffed into something that does.
+    reply.header('Content-Security-Policy', "sandbox; default-src 'none'").header('X-Content-Type-Options', 'nosniff');
+    const root = await fs.realpath(project.dir);
+    const r = await fileResponse(root, rest, req.headers.range);
+    if ('file' in r && !servable(path.relative(root, r.file))) return sendError(reply, 403, 'FORBIDDEN', 'Not a served file');
     if (!('file' in r)) {
       reply.headers(r.headers);
       return r.status === 403 ? sendError(reply, 403, 'FORBIDDEN', 'Outside the project folder')
         : r.status === 404 ? sendError(reply, 404, 'NOT_FOUND', 'No such file') : reply.code(416).send();
     }
     reply.code(r.status).headers(r.headers);
+    if (path.extname(r.file).toLowerCase() === '.svg') reply.header('Content-Disposition', 'attachment');
     return r.empty ? reply.send('') : reply.send(createReadStream(r.file, { start: r.start, end: r.end }));
   });
 

@@ -34,7 +34,7 @@ export function maskApiKey(key: string): string {
 export class SettingsStore {
   private chain: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly file: string = DEFAULT_SETTINGS_FILE) {}
+  constructor(readonly file: string = DEFAULT_SETTINGS_FILE) {}
 
   async get(): Promise<Settings> {
     let text: string;

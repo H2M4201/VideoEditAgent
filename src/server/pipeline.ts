@@ -60,6 +60,23 @@ function guardedTranscriber(s: Settings, t: Transcriber): Transcriber {
   };
 }
 
+// ---- per-video lock ----
+
+const videoLocks = new Map<string, Promise<unknown>>();
+
+/**
+ * Runs `fn` after every earlier locked call for the same video has finished. Every read-latest -> save sequence
+ * (approve, generate, fix, revert) goes through here, so no two writers base a version on the same latest.
+ */
+export function withVideoLock<T>(p: Project, videoId: string, fn: () => Promise<T>): Promise<T> {
+  const key = `${p.id}/${videoId}`;
+  const run = (videoLocks.get(key) ?? Promise.resolve()).then(fn);
+  const tail = run.catch(() => {});
+  videoLocks.set(key, tail);
+  void tail.then(() => { if (videoLocks.get(key) === tail) videoLocks.delete(key); });
+  return run;
+}
+
 // ---- files ----
 
 const posix = (p: string) => p.split(path.sep).join('/');
@@ -186,7 +203,12 @@ async function render(p: Project, videoId: string, n: number, timeline: Timeline
 export type GenerateRequest = { videoId: string; prompt: string; roles: RoleAssignment[]; engine: string };
 
 /** planTimeline -> save v1 -> render. */
-export async function runGenerate(p: Project, req: GenerateRequest, deps: JobDeps, report: Report):
+export function runGenerate(p: Project, req: GenerateRequest, deps: JobDeps, report: Report):
+  Promise<{ videoId: string; version: number; notFollowed: NotFollowed[]; output: Output }> {
+  return withVideoLock(p, req.videoId, () => generate(p, req, deps, report));
+}
+
+async function generate(p: Project, req: GenerateRequest, deps: JobDeps, report: Report):
   Promise<{ videoId: string; version: number; notFollowed: NotFollowed[]; output: Output }> {
   requireApiKey(deps.settings);
   await ensureFfmpeg();
@@ -206,7 +228,11 @@ export type FixJobResult = { status: 'refused'; reason: string; needsUnlock: boo
   | { status: 'applied'; version: number; targets: string[]; summary: string; output: Output };
 
 /** fixTimeline on the latest version; on 'applied' save a new version and render it. A refusal is a result, not a failure. */
-export async function runFix(p: Project, videoId: string, req: { feedback: string; unlock: boolean }, deps: JobDeps, report: Report): Promise<FixJobResult> {
+export function runFix(p: Project, videoId: string, req: { feedback: string; unlock: boolean }, deps: JobDeps, report: Report): Promise<FixJobResult> {
+  return withVideoLock(p, videoId, () => fix(p, videoId, req, deps, report));
+}
+
+async function fix(p: Project, videoId: string, req: { feedback: string; unlock: boolean }, deps: JobDeps, report: Report): Promise<FixJobResult> {
   requireApiKey(deps.settings);
   await ensureFfmpeg();
   const meta = (await readVideoMeta(p.dir, videoId))!;
@@ -224,7 +250,11 @@ export async function runFix(p: Project, videoId: string, req: { feedback: strin
 }
 
 /** Saves version `n`'s timeline (approvals as they were then) as the newest version and renders it. */
-export async function runRevert(p: Project, videoId: string, n: number, deps: JobDeps, report: Report): Promise<{ version: number; output: Output }> {
+export function runRevert(p: Project, videoId: string, n: number, deps: JobDeps, report: Report): Promise<{ version: number; output: Output }> {
+  return withVideoLock(p, videoId, () => revert(p, videoId, n, deps, report));
+}
+
+async function revert(p: Project, videoId: string, n: number, deps: JobDeps, report: Report): Promise<{ version: number; output: Output }> {
   const meta = (await readVideoMeta(p.dir, videoId))!;
   const store = new VersionStore(videoDir(p.dir, videoId));
   const timeline = await store.load(n);
@@ -234,7 +264,11 @@ export async function runRevert(p: Project, videoId: string, n: number, deps: Jo
 }
 
 /** Sets an approval on the latest timeline and saves it as a new version that shows the previous render (no re-render). */
-export async function approveItem(p: Project, videoId: string, id: string, approved: boolean): Promise<{ version: number }> {
+export function approveItem(p: Project, videoId: string, id: string, approved: boolean): Promise<{ version: number }> {
+  return withVideoLock(p, videoId, () => approve(p, videoId, id, approved));
+}
+
+async function approve(p: Project, videoId: string, id: string, approved: boolean): Promise<{ version: number }> {
   const store = new VersionStore(videoDir(p.dir, videoId));
   const latest = (await store.latest())!;
   if (![...latest.timeline.segments, ...latest.timeline.captions].some(i => i.id === id)) {

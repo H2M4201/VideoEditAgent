@@ -179,6 +179,14 @@ describe('projects', () => {
     expect(ids).toContain(projectId);
   }, 60_000);
 
+  test('the filesystem root, the home folder and folders around the settings file cannot be projects', async () => {
+    const settingsDir = path.dirname(settings.file);
+    for (const dir of ['/', os.homedir(), settingsDir, path.dirname(settingsDir)]) {
+      const r = await post('/api/projects', { dir });
+      expect([r.statusCode, r.json().error.code], dir).toEqual([400, 'UNSAFE_FOLDER']);
+    }
+  });
+
   test('bad folders are rejected with the project error code', async () => {
     expect((await post('/api/projects', { dir: 'relative/dir' })).statusCode).toBe(400);
     const missing = await post('/api/projects', { dir: path.join(proj, 'nope') });
@@ -346,6 +354,18 @@ describe('videos', () => {
     expect((await post(`${vurl()}/revert`, { version: 99 })).statusCode).toBe(400);
   }, 30_000);
 
+  test('concurrent approvals of different items on one video all persist', async () => {
+    const ids = ['s1', 's3', 'c1', 'c3', 's2'];
+    const res = await Promise.all(ids.map(id => post(`${vurl()}/approve`, { id, approved: true })));
+    expect(res.map(r => r.statusCode)).toEqual(ids.map(() => 200));
+    expect(res.map(r => r.json().version).sort((a: number, b: number) => a - b)).toEqual([7, 8, 9, 10, 11]);
+    const v = await video();
+    expect(v.versions.map((x: { n: number }) => x.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    const t = v.latest.timeline as Timeline;
+    for (const id of ids) expect([...t.segments, ...t.captions].find(i => i.id === id)?.approved, id).toBe(true);
+    expect(v.versions[10].output.url).toMatch(/\/v6\.mp4$/);
+  });
+
   test('approve is refused while a job for that video is waiting', async () => {
     let release!: () => void;
     const blocker = queue.add('render', { projectId, videoId }, () => new Promise(r => { release = () => r(null); }));
@@ -369,7 +389,7 @@ describe('video list', () => {
     expect(list.map((x: { videoId: string }) => x.videoId)).toEqual([second, videoId]);
     expect(list[0]).toEqual({ videoId: second, prompt: 'second take', engine: 'builtin', createdAt: expect.any(String), latestVersion: 1,
       output: { url: `/media/${projectId}/.vea/videos/${second}/v1.mp4`, path: expect.any(String) } });
-    expect(list[1]).toMatchObject({ videoId, prompt: '45s tour', latestVersion: 6, output: { url: expect.stringMatching(/\/v6\.mp4$/) } });
+    expect(list[1]).toMatchObject({ videoId, prompt: '45s tour', latestVersion: 11, output: { url: expect.stringMatching(/\/v6\.mp4$/) } });
     expect((await get('/api/projects/ffffffff/videos')).statusCode).toBe(404);
   }, 30_000);
 });
@@ -413,6 +433,26 @@ describe('media', () => {
     const part = await get(`/media/${projectId}/raw/c%E1%BA%A3nh%201.mp4`, { range: 'bytes=0-9' });
     expect([part.statusCode, part.rawPayload.length]).toEqual([206, 10]);
     expect(part.headers['content-range']).toMatch(/^bytes 0-9\//);
+  });
+
+  test('every /media response is sandboxed; SVG is a download', async () => {
+    await fs.writeFile(path.join(proj, 'reference', 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+    for (const url of [`/media/${projectId}/raw/b.mp4`, `/media/${projectId}/reference/logo.svg`, `/media/${projectId}/raw/missing.mp4`]) {
+      const r = await get(url);
+      expect(r.headers['content-security-policy'], url).toBe("sandbox; default-src 'none'");
+      expect(r.headers['x-content-type-options'], url).toBe('nosniff');
+    }
+    expect((await get(`/media/${projectId}/reference/logo.svg`)).headers['content-disposition']).toBe('attachment');
+    expect((await get(`/media/${projectId}/raw/b.mp4`)).headers['content-disposition']).toBeUndefined();
+  });
+
+  test('inside .vea only videos/ and downloads/ are served', async () => {
+    const analysisFiles = await fs.readdir(path.join(proj, '.vea', 'analysis'));
+    expect(analysisFiles.length).toBeGreaterThan(0);
+    expect((await get(`/media/${projectId}/.vea/analysis/${encodeURIComponent(analysisFiles[0])}`)).statusCode).toBe(403);
+    expect((await get(`/media/${projectId}/.vea/prepare.json`)).statusCode).toBe(403);
+    expect((await get(`/media/${projectId}/.vea/videos/${videoId}/v1.mp4`)).statusCode).toBe(200);
+    expect((await get(`/media/${projectId}/${downloadPath}`)).statusCode).toBe(200);
   });
 
   test('refuses anything outside the project folder with 403', async () => {

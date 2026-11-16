@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
@@ -31,6 +32,20 @@ const RevertBody = z.object({ version: z.number().int().min(1) });
 const projectId = (dir: string) => createHash('sha256').update(dir).digest('hex').slice(0, 16);
 const newVideoId = () => `${Date.now().toString(36)}${randomBytes(3).toString('hex')}`;
 
+const within = (child: string, parent: string) => child === parent || child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
+
+/**
+ * /media serves everything under a project folder, so a project may not be the filesystem root, the home folder,
+ * or a folder that holds (or lies inside) the settings directory with the API key.
+ */
+async function refuseUnsafeFolder(real: string, settingsDir: string): Promise<void> {
+  const settingsReal = await fs.realpath(settingsDir).catch(() => path.resolve(settingsDir));
+  const home = await fs.realpath(os.homedir()).catch(() => os.homedir());
+  if (real === path.parse(real).root || real === home || within(settingsReal, real) || within(real, settingsReal)) {
+    throw new AppError('UNSAFE_FOLDER', `${real} cannot be a project folder (it is the root, the home folder, or holds the app settings). Choose the folder of one shoot.`);
+  }
+}
+
 export function registerProjectRoutes(app: FastifyInstance, deps: AppDeps & { engines: (id: string) => Engine }): void {
   async function project(id: string): Promise<ProjectEntry> {
     const p = (await deps.settings.get()).projects.find(x => x.id === id);
@@ -51,8 +66,9 @@ export function registerProjectRoutes(app: FastifyInstance, deps: AppDeps & { en
 
   app.post('/api/projects', async req => {
     const { dir } = parseBody(RegisterBody, req.body);
-    await ensureFfmpeg();
     const real = await fs.realpath(dir).catch(() => path.resolve(dir));
+    await refuseUnsafeFolder(real, path.dirname(deps.settings.file));
+    await ensureFfmpeg();
     const scan = await scanProject(real);
     const id = projectId(real);
     const fresh: ProjectEntry = { id, dir: real, name: path.basename(real) };
