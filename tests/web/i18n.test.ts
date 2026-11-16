@@ -25,4 +25,14 @@ describe('i18n', () => {
     expect(unknown).toContain('server words');
     setLanguage('vi');
   });
+
+  test('every error code the server or the client can produce has a translation in both languages', () => {
+    const codes = ['UNKNOWN_ITEM', 'UNKNOWN_VERSION', 'BAD_ROLES', 'PROJECT_NOT_FOUND', 'VIDEO_NOT_FOUND', 'FORBIDDEN', 'BAD_REQUEST', 'NETWORK',
+      'BUSY', 'ENGINE_UNAVAILABLE', 'APPROVED_CONFLICT', 'BROWSER_UNAVAILABLE', 'API_KEY_REJECTED', 'API_RATE_LIMIT', 'ALREADY_RENDERED'];
+    for (const lang of ['vi', 'en'] as const) {
+      setLanguage(lang);
+      for (const code of codes) expect(errorText({ code, message: 'server words' }), `${lang} ${code}`).not.toContain('server words');
+    }
+    setLanguage('vi');
+  });
 });

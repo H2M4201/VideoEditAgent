@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, type FixJobResult, type RevertJobResult, type Job, type ProjectEntry, type VideoDetail } from '../api';
 import { JobError, JobProgress } from '../components/JobProgress';
-import { itemTimes, SegmentList } from '../components/SegmentList';
+import { itemTimes, mss, SegmentList } from '../components/SegmentList';
 import { VersionList } from '../components/VersionList';
 import { errorText, t } from '../i18n';
 import { useJobs } from '../useJobs';
 
 type Props = { project: ProjectEntry; videoId: string; onStartOver: () => void };
-type Refusal = { reason: string; needsUnlock: boolean };
+type Refusal = Extract<FixJobResult, { status: 'refused' }>;
+type Applied = { summary: string; changed: string[] };
 
 export function Result({ project, videoId, onStartOver }: Props) {
   const { waitFor } = useJobs();
   const [detail, setDetail] = useState<VideoDetail | null>(null);
   const [feedback, setFeedback] = useState('');
   const [refusal, setRefusal] = useState<Refusal | null>(null);
-  const [applied, setApplied] = useState<string | null>(null);
+  const [applied, setApplied] = useState<Applied | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<{ code: string; message: string } | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -44,7 +45,7 @@ export function Result({ project, videoId, onStartOver }: Props) {
     const job = await work(() => api.fix(project.id, videoId, { feedback, unlock }));
     const result = job?.status === 'done' ? (job.result as FixJobResult) : null;
     if (result?.status === 'refused') setRefusal(result);
-    if (result?.status === 'applied') { setApplied(result.summary); setFeedback(''); }
+    if (result?.status === 'applied') { setApplied({ summary: result.summary, changed: result.changed }); setFeedback(''); }
   }
 
   async function revertTo(n: number) {
@@ -93,13 +94,29 @@ export function Result({ project, videoId, onStartOver }: Props) {
       <JobProgress jobId={jobId} />
       {failure && <p role="alert" className="error">{errorText(failure)}</p>}
       {notice && <p role="status" className="notice">{notice}</p>}
-      {applied && <p role="status">{t('fixApplied', { summary: applied })}</p>}
+      {applied && (
+        <div role="status"><p>{t('fixApplied', { summary: applied.summary })}</p>
+          {applied.changed.length > 0 && <p>{t('changedItems', { items: itemTimes(latest.timeline, applied.changed) })}</p>}</div>
+      )}
       {refusal && (
         <div className="notice" role="status"><strong>{t('refused')}</strong>
-          <p>{refusal.reason}</p>
+          <RefusalText refusal={refusal} durationFrames={latest.timeline.durationFrames} />
           {refusal.needsUnlock && <button type="button" disabled={busy} onClick={() => void sendFix(true)}>{t('unlock')}</button>}
         </div>
       )}
     </div>
   );
+}
+
+/** A refusal in the UI language where its code is known; the model's own reason (already in the feedback's language) otherwise. */
+function RefusalText({ refusal, durationFrames }: { refusal: Refusal; durationFrames: number }) {
+  switch (refusal.code) {
+    case 'APPROVED': return <p>{t('refusal.APPROVED')}</p>;
+    case 'NOTHING_AT_TIME': return <p>{t('refusal.NOTHING_AT_TIME', { length: mss(durationFrames) })}</p>;
+    case 'COULD_NOT_APPLY': return (
+      <><p>{t('refusal.COULD_NOT_APPLY')}</p>
+        <details><summary>{t('technicalDetails')}</summary><p className="muted">{refusal.reason}</p></details></>
+    );
+    default: return <p>{refusal.reason}</p>;
+  }
 }
