@@ -233,6 +233,43 @@ default engine, model).
 - Link download: yt-dlp on the user's machine.
 - ffmpeg and yt-dlp are bundled or checked at start-up.
 
+### 5.14 Clarifications after review (assistant's calls unless marked)
+
+- **Build order.** Built-in engine first, end to end. The CapCut engine is
+  built second and needs a sample draft folder and the version number from
+  an agency machine before work starts. If the agency's version encrypts
+  drafts and cannot be pinned to an older one, the CapCut engine is dropped
+  from Phase 1 and the app ships with the built-in engine only.
+- **What "only that segment changes" guarantees.** The guarantee is at the
+  timeline level (section 6): untouched segments and captions are identical
+  between versions. Re-rendering only changed segments is a speed
+  optimisation; a full re-render from the patched timeline is acceptable.
+  Frame- or byte-identical output is not required.
+- **Fixes with the CapCut engine.** One-way: the app never reads a draft
+  back. Each timeline version is written as a new draft (named with the
+  version number), so a draft the editor hand-finished is never overwritten.
+  Hand edits made in CapCut are not carried into later versions; the app
+  says so when a fix is requested on a CapCut project.
+- **When a fix does not fit its slot.** Inside the slot the agent may trim,
+  pick a different in/out, or change speed between 0.75x and 1.5x. Caption
+  text that is too long is wrapped or shrunk within the style's limits; its
+  timing does not change. If the request still cannot fit, or it asks for a
+  duration change ("make the intro shorter"), the app refuses, explains, and
+  offers an explicit unlock that lets later segments move.
+- **Approval.** Approval is per segment and per caption, carries forward to
+  every later version and across an engine switch, and can be removed by the
+  user. Typing into the feedback box always produces a patch. A fresh
+  generation is a separate, explicit "Start over" action that creates a new
+  video with its own version history and no approvals.
+- **Slow machines.** Local transcription is the default. A hosted
+  transcription service is an opt-in setting; turning it on warns that audio
+  tracks will be uploaded, which is an exception to the "media never leaves
+  the machine" rule that the user accepts by enabling it. Agency hardware is
+  unknown; the builder should measure on a mid-range laptop without a GPU.
+- **Language.** UI in Vietnamese and English, switchable, Vietnamese by
+  default. Prompts and guidelines may be written in either. (To be confirmed
+  by the user.)
+
 ## 6. Acceptance
 
 - For each starter style, one sample video generated from a real project
