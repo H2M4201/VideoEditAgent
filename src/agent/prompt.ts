@@ -3,6 +3,7 @@ import { FPS, HEIGHT, WIDTH, type Effect, type Style, type Transition } from '..
 import type { FileAnalysis, Shot } from '../analysis';
 import type { RoleAssignment } from '../project/roles';
 import type { PlanContext } from './plan';
+import type { ProjectScan } from '../project/scan';
 
 export type EngineCapabilities = { transitions: Transition['type'][]; effects: Effect['type'][]; captionAnimations: ('line' | 'word')[] };
 
@@ -129,6 +130,18 @@ function roleLine(r: RoleAssignment): string {
   return `- ${r.path}: ${r.role}${r.role === 'style' ? `, useAudio: ${r.useAudio}` : ''} (decided by ${r.decidedBy}: ${r.reason})`;
 }
 
+/** Every raw file with its duration, transcript and shots (each with one sampled frame). */
+export async function rawFootageBlocks(scan: ProjectScan, analysis: Record<string, FileAnalysis>): Promise<ContentBlock[]> {
+  const blocks: ContentBlock[] = [text(`# Raw footage (cut only from these files)\n\nEach shot is [index, startSec, endSec], followed by a frame from its middle.`)];
+  for (const m of scan.raw) {
+    const a = analysis[m.path];
+    const t = transcriptText(a);
+    blocks.push(text(`## ${m.path}\n${m.kind}, duration ${sec(m.durationSec)}s, ${m.hasAudio ? 'has audio' : 'no audio'}${t ? `\n${t}` : ''}`));
+    blocks.push(...(await shotBlocks(a?.shots ?? [])));
+  }
+  return blocks;
+}
+
 /** The user message asking for a timeline: prompt, roles, timing driver, raw footage frames, transcripts, beats, reference pace, format rules. */
 export async function buildPlanMessage(ctx: PlanContext): Promise<ContentBlock[]> {
   const blocks: ContentBlock[] = [];
@@ -136,13 +149,7 @@ export async function buildPlanMessage(ctx: PlanContext): Promise<ContentBlock[]
   blocks.push(text(`# User prompt\n\n${ctx.prompt}\n\n# Reference roles\n\n${active.length ? active.map(roleLine).join('\n') : 'none'}\n\n` +
     `# Timing driver\n\n${ctx.driver} (${DRIVER_HELP[ctx.driver]})`));
 
-  blocks.push(text(`# Raw footage (cut only from these files)\n\nEach shot is [index, startSec, endSec], followed by a frame from its middle.`));
-  for (const m of ctx.scan.raw) {
-    const a = ctx.analysis[m.path];
-    const t = transcriptText(a);
-    blocks.push(text(`## ${m.path}\n${m.kind}, duration ${sec(m.durationSec)}s, ${m.hasAudio ? 'has audio' : 'no audio'}${t ? `\n${t}` : ''}`));
-    blocks.push(...(await shotBlocks(a?.shots ?? [])));
-  }
+  blocks.push(...(await rawFootageBlocks(ctx.scan, ctx.analysis)));
 
   if (active.length) blocks.push(text('# References'));
   for (const r of active) {
