@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, ApiError, type FixJobResult, type Job, type NotFollowed, type ProjectEntry, type VideoDetail } from '../api';
+import { api, ApiError, type FixJobResult, type RevertJobResult, type Job, type ProjectEntry, type VideoDetail } from '../api';
 import { JobError, JobProgress } from '../components/JobProgress';
-import { SegmentList } from '../components/SegmentList';
+import { itemTimes, SegmentList } from '../components/SegmentList';
 import { VersionList } from '../components/VersionList';
 import { errorText, t } from '../i18n';
 import { useJobs } from '../useJobs';
 
-type Props = { project: ProjectEntry; videoId: string; notFollowed?: NotFollowed[]; onStartOver: () => void };
+type Props = { project: ProjectEntry; videoId: string; onStartOver: () => void };
 type Refusal = { reason: string; needsUnlock: boolean };
 
-export function Result({ project, videoId, notFollowed = [], onStartOver }: Props) {
+export function Result({ project, videoId, onStartOver }: Props) {
   const { waitFor } = useJobs();
   const [detail, setDetail] = useState<VideoDetail | null>(null);
   const [feedback, setFeedback] = useState('');
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const [applied, setApplied] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<{ code: string; message: string } | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -24,7 +25,7 @@ export function Result({ project, videoId, notFollowed = [], onStartOver }: Prop
 
   /** Runs `act` (which may start a job), waits for the job, reloads the video. Returns the job's result. */
   async function work(act: () => Promise<{ job: { id: string } } | unknown>): Promise<Job | null> {
-    setBusy(true); setFailure(null); setRefusal(null); setApplied(null);
+    setBusy(true); setFailure(null); setRefusal(null); setApplied(null); setNotice(null);
     try {
       const r = await act();
       const id = (r as { job?: { id: string } } | null)?.job?.id;
@@ -46,9 +47,18 @@ export function Result({ project, videoId, notFollowed = [], onStartOver }: Prop
     if (result?.status === 'applied') { setApplied(result.summary); setFeedback(''); }
   }
 
+  async function revertTo(n: number) {
+    const before = detail?.latest?.timeline;
+    const job = await work(() => api.revert(project.id, videoId, n));
+    const result = job?.status === 'done' ? (job.result as RevertJobResult) : null;
+    if (result?.status === 'refused' && before) setNotice(t('revertConflict', { items: itemTimes(before, result.ids) }));
+  }
+
   if (!detail) return failure ? <JobError job={{ error: failure }} /> : <p className="muted">{t('loading')}</p>;
   const latest = detail.latest!;
-  const src = detail.versions.find(v => v.n === latest.n)?.output?.url ?? undefined;
+  const notFollowed = detail.notFollowed;
+  const latestOutput = detail.versions.find(v => v.n === latest.n)?.output ?? null;
+  const src = latestOutput?.url ?? undefined;
 
   return (
     <div className="page result">
@@ -63,9 +73,13 @@ export function Result({ project, videoId, notFollowed = [], onStartOver }: Prop
       <div className="columns">
         <div>
           <video controls src={src} className="player" />
+          {!latestOutput && (
+            <p className="notice">{t('noVideoYet')}{' '}
+              <button type="button" disabled={busy} onClick={() => void work(() => api.render(project.id, videoId))}>{t('renderAgain')}</button></p>
+          )}
           <h3>{t('versions')}</h3>
           <VersionList versions={detail.versions} latest={latest.n} disabled={busy}
-            onRevert={n => void work(() => api.revert(project.id, videoId, n))} />
+            onRevert={n => void revertTo(n)} />
         </div>
         <div>
           <SegmentList timeline={latest.timeline} onApprove={(id, approved) => void work(() => api.approve(project.id, videoId, id, approved))} />
@@ -78,6 +92,7 @@ export function Result({ project, videoId, notFollowed = [], onStartOver }: Prop
       <button type="button" className="primary" disabled={busy || !feedback.trim()} onClick={() => void sendFix(false)}>{t('sendFeedback')}</button>
       <JobProgress jobId={jobId} />
       {failure && <p role="alert" className="error">{errorText(failure)}</p>}
+      {notice && <p role="status" className="notice">{notice}</p>}
       {applied && <p role="status">{t('fixApplied', { summary: applied })}</p>}
       {refusal && (
         <div className="notice" role="status"><strong>{t('refused')}</strong>

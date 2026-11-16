@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { api, type GenerateResult, type ProjectEntry, type Settings as S } from './api';
+import { api, type ProjectEntry, type Settings as S } from './api';
 import { setLanguage, t, useLanguage } from './i18n';
 import { NewVideo } from './pages/NewVideo';
 import { Projects } from './pages/Projects';
@@ -19,7 +19,6 @@ export function App() {
   const [page, videoId] = hash.split('/');
   const [settings, setSettings] = useState<S | null>(null);
   const [project, setProject] = useState<ProjectEntry | null>(null);
-  const [notFollowed, setNotFollowed] = useState<GenerateResult['notFollowed']>([]);
 
   useEffect(() => { void api.settings().then(s => { setLanguage(s.language); setSettings(s); }); }, []);
   useEffect(() => { document.title = t('app.title'); });
@@ -39,14 +38,14 @@ export function App() {
         {active === 'settings' && <Settings settings={settings} onSaved={s => { setSettings(s); setLanguage(s.language); }} />}
         {active === 'queue' && <Queue />}
         {active === 'new' && (project
-          ? <NewVideo project={project} settings={settings} onGenerated={r => { setNotFollowed(r.notFollowed); go(`result/${r.videoId}`); }} />
+          ? <NewVideo project={project} settings={settings} onGenerated={r => go(`result/${r.videoId}`)} />
           : <p className="pad">{t('newVideo.pickProject')}</p>)}
         {active === 'result' && project && videoId && (
-          <Result key={videoId} project={project} videoId={videoId} notFollowed={notFollowed} onStartOver={() => go('new')} />
+          <Result key={videoId} project={project} videoId={videoId} onStartOver={() => go('new')} />
         )}
         {(active === 'projects' || (active === 'result' && !project)) && (
           <Projects selected={project} onSelect={setProject} onNewVideo={() => go('new')}
-            onOpenVideo={id => { setNotFollowed([]); go(`result/${id}`); }} />
+            onOpenVideo={id => go(`result/${id}`)} />
         )}
       </main>
     </>

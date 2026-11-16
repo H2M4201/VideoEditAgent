@@ -82,6 +82,11 @@ export const vi = {
   current: 'hiện tại',
   startOver: 'Làm lại từ đầu',
   fixApplied: 'Đã chỉnh xong: {summary}',
+  'item.segment': 'cảnh',
+  'item.caption': 'phụ đề',
+  renderAgain: 'Dựng lại video',
+  noVideoYet: 'Phiên bản này chưa có video (lần dựng trước bị lỗi).',
+  revertConflict: 'Không thể quay lại phiên bản đó: các mục đã duyệt sau đây khác trong phiên bản đó: {items}. Hãy bỏ duyệt các mục này trước rồi thử lại.',
 
   // Queue
   'queue.title': 'Hàng đợi',
@@ -117,7 +122,7 @@ export const vi = {
   'error.FFMPEG_MISSING': 'Không tìm thấy ffmpeg. Hãy cài ffmpeg (đã gồm ffprobe) và thêm vào PATH.',
   'error.UNSAFE_FOLDER': 'Không thể dùng thư mục này làm dự án (thư mục gốc, thư mục cá nhân hoặc nơi chứa cài đặt). Hãy chọn thư mục của một buổi quay.',
   'error.NO_RAW_FOLDER': 'Thư mục dự án chưa có thư mục con "raw" chứa cảnh quay.',
-  'error.NO_RAW_FOOTAGE': 'Thư mục "raw" chưa có tệp video nào.',
+  'error.NO_RAW_FOOTAGE': 'Thư mục "raw" chưa có tệp video nào đọc được.',
   'error.NOT_A_FOLDER': 'Đường dẫn này không phải là một thư mục.',
   'error.INVALID_AFTER_RETRIES': 'AI chưa trả về kết quả hợp lệ sau nhiều lần thử. Hãy thử lại hoặc viết yêu cầu rõ hơn.',
   'error.API_ERROR': 'Không gọi được dịch vụ AI. Hãy kiểm tra khóa API và kết nối mạng, rồi thử lại.',
@@ -125,5 +130,7 @@ export const vi = {
   'error.NOT_PREPARED': 'Hãy kiểm tra tham chiếu trước khi tạo video.',
   'error.BUSY': 'Video này đang có công việc chạy. Hãy đợi xong rồi thử lại.',
   'error.GUIDELINE_EXISTS': 'Dự án này đã có guideline.md.',
+  'error.BROWSER_UNAVAILABLE': 'Không dựng được video vì không mở hoặc tải được trình duyệt dùng để dựng. Hãy kiểm tra kết nối Internet rồi khởi động lại ứng dụng.',
+  'error.ALREADY_RENDERED': 'Phiên bản mới nhất đã có video.',
   'error.INTERNAL': 'Đã xảy ra lỗi:',
 } as const;

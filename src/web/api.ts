@@ -2,15 +2,16 @@ import type { Timeline } from '../core/timeline';
 import type { NotFollowed } from '../agent/plan';
 import type { RoleAssignment } from '../project/roles';
 import type { ProjectScan } from '../project/scan';
-import type { describeVideo, FixJobResult, Output, PrepareResult } from '../server/pipeline';
+import type { describeVideo, FixJobResult, Output, PrepareResult, RevertJobResult } from '../server/pipeline';
 import type { Job } from '../server/jobs';
 import type { ProjectEntry, Settings } from '../server/settings';
 
-export type { Job, NotFollowed, Output, PrepareResult, ProjectEntry, ProjectScan, RoleAssignment, Settings, Timeline, FixJobResult };
+export type { Job, NotFollowed, Output, PrepareResult, ProjectEntry, ProjectScan, RoleAssignment, Settings, Timeline, FixJobResult, RevertJobResult };
 export type Starter = 'real-estate' | 'vlog' | 'trend';
 export type EngineInfo = { id: string; capabilities: unknown; available: boolean; reason?: string };
 export type VideoDetail = NonNullable<Awaited<ReturnType<typeof describeVideo>>>;
-export type VideoSummary = { videoId: string; prompt: string; engine: string; createdAt: string; latestVersion: number | null; output: Output | null };
+export type VideoSummary = { videoId: string; prompt: string; engine: string; createdAt: string; latestVersion: number | null;
+  notFollowed: NotFollowed[]; output: Output | null };
 export type GenerateResult = { videoId: string; version: number; notFollowed: NotFollowed[]; output: Output };
 export type GenerateRequest = { prompt: string; roles: RoleAssignment[]; engine: string };
 
@@ -51,4 +52,5 @@ export const api = {
   approve: (id: string, vid: string, itemId: string, approved: boolean) => call<{ version: number }>('POST', `${v(id, vid)}/approve`, { id: itemId, approved }),
   fix: (id: string, vid: string, body: { feedback: string; unlock: boolean }) => call<{ job: Job }>('POST', `${v(id, vid)}/fix`, body),
   revert: (id: string, vid: string, version: number) => call<{ job: Job }>('POST', `${v(id, vid)}/revert`, { version }),
+  render: (id: string, vid: string) => call<{ job: Job }>('POST', `${v(id, vid)}/render`, {}),
 };

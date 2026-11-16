@@ -110,6 +110,27 @@ describe('NewVideo', () => {
     expect(screen.queryByText(/raw server text/)).toBeNull();
   });
 
+  test('editing the prompt after "Check references" clears the prepared roles; they must be checked again', async () => {
+    const user = await prepare();
+    await user.type(screen.getByLabelText(t('prompt')), ', end on the pool');
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByRole('button', { name: t('generate') })).toBeNull();
+    await user.click(screen.getByRole('button', { name: t('checkReferences') }));
+    await screen.findByRole('table');
+    expect(api.prepare).toHaveBeenLastCalledWith('p1', '45s tour, end on the pool');
+  });
+
+  test('when the default engine is unavailable the first available engine is selected and sent', async () => {
+    const s = { ...(settings as object), defaultEngine: 'capcut' };
+    const user = await prepare(s);
+    await waitFor(() => expect(screen.getByLabelText(t('engine'))).toHaveValue('builtin'));
+    api.generate.mockResolvedValue({ job: { id: 'j2' } });
+    h.waitFor.mockResolvedValue({ id: 'j2', status: 'done', result: { videoId: 'abc', version: 1, notFollowed: [], output: { url: null, path: '' } } });
+    await user.click(screen.getByRole('button', { name: t('generate') }));
+    await waitFor(() => expect(api.generate).toHaveBeenCalled());
+    expect(api.generate.mock.calls[0][1].engine).toBe('builtin');
+  });
+
   test('Generate button label follows the language', async () => {
     await prepare();
     expect(screen.getByRole('button', { name: 'Generate' })).toBeInTheDocument();

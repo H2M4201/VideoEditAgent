@@ -21,7 +21,20 @@ export function NewVideo({ project, settings, onGenerated }: Props) {
   const [busy, setBusy] = useState(false);
   const noKey = !settings.apiKey;
 
-  useEffect(() => { void api.engines().then(setEngines).catch(() => setEngines([])); }, []);
+  useEffect(() => {
+    void api.engines().then(list => {
+      setEngines(list);
+      // An unavailable default (e.g. CapCut not installed) would only fail at generate: pick the first available engine.
+      setEngine(current => (list.some(e => e.id === current && e.available) ? current : list.find(e => e.available)?.id ?? current));
+    }).catch(() => setEngines([]));
+  }, []);
+
+  /** A new prompt may decide roles differently: the user must check references again. */
+  function changePrompt(text: string) {
+    setPrompt(text);
+    setPrepared(null);
+    setRows([]);
+  }
 
   /** Starts a job with `start`, waits for it, and returns its result (or null after showing the error). */
   async function run<T>(start: () => Promise<{ job: { id: string } }>): Promise<T | null> {
@@ -66,7 +79,7 @@ export function NewVideo({ project, settings, onGenerated }: Props) {
       </div>
       <div className="field">
         <label htmlFor="prompt">{t('prompt')}</label>
-        <textarea id="prompt" rows={3} placeholder={t('promptHint')} value={prompt} onChange={e => setPrompt(e.target.value)} />
+        <textarea id="prompt" rows={3} placeholder={t('promptHint')} value={prompt} onChange={e => changePrompt(e.target.value)} />
       </div>
       <button type="button" className="primary" disabled={noKey || busy} onClick={() => void check()}>{t('checkReferences')}</button>
       <JobProgress jobId={jobId} />

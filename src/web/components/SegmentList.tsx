@@ -6,6 +6,12 @@ export const mss = (frame: number) => `${Math.floor(frame / FPS / 60)}:${String(
 
 type Item = { id: string; startFrame: number; approved: boolean };
 
+/** "0:06 shot, 0:06 caption": the given segment and caption ids of `timeline` by start time, in timeline order. */
+export function itemTimes(timeline: Timeline, ids: string[]): string {
+  return [...timeline.segments.map(s => [s, t('item.segment')] as const), ...timeline.captions.map(c => [c, t('item.caption')] as const)]
+    .filter(([i]) => ids.includes(i.id)).map(([i, kind]) => `${mss(i.startFrame)} ${kind}`).join(', ');
+}
+
 function Section({ title, items, label, onApprove }: { title: string; items: Item[]; label: (i: never) => string; onApprove: (id: string, approved: boolean) => void }) {
   return (
     <section>
