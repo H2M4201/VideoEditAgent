@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
     "execa": "^10.2.1",
     "music-tempo": "^1.0.3",
     "zod": "^4.6.7"
