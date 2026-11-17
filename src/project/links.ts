@@ -24,7 +24,8 @@ export async function downloadLinks(projectDir: string, urls: string[],
     if (fs.existsSync(abs)) { results.push({ url, ok: true, path: rel }); continue; }
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     try {
-      await run(o.ytDlp, ['-f', 'mp4/best', '--no-playlist', '-o', abs, url]);
+      // -o is an output template: a literal % is written %%. --ignore-config keeps user/system yt-dlp configs out.
+      await run(o.ytDlp, ['--ignore-config', '-f', 'mp4/best', '--no-playlist', '-o', abs.replace(/%/g, '%%'), url]);
     } catch (e) {
       const err = e as { code?: string; stderr?: string; message?: string };
       const error = err.code === 'ENOENT' ? `yt-dlp not found (${o.ytDlp})` : (err.stderr || err.message || 'download failed');

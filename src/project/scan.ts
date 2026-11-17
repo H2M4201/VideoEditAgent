@@ -3,7 +3,8 @@ import path from 'node:path';
 import { probeMedia, type MediaInfo } from './probe';
 
 export type { MediaInfo };
-export type ProjectScan = { raw: MediaInfo[]; references: { media: MediaInfo[]; scripts: { path: string; text: string }[]; links: string[] };
+export type ProjectScan = { raw: MediaInfo[];
+  references: { media: MediaInfo[]; scripts: { path: string; text: string }[]; links: string[]; /** for logo overlays */ images: string[] };
   guidelinePath: string | null; warnings: string[] };
 
 export class ProjectError extends Error {
@@ -12,6 +13,7 @@ export class ProjectError extends Error {
 
 const MEDIA_EXT = new Set(['.mp4', '.mov', '.mkv', '.webm', '.mp3', '.wav', '.m4a', '.aac']);
 const SCRIPT_EXT = new Set(['.txt', '.md', '.srt']);
+const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 
 const byPath = (a: { path: string }, b: { path: string }) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
 const isDir = async (p: string) => (await fs.stat(p).catch(() => null))?.isDirectory() ?? false;
@@ -39,11 +41,13 @@ export async function scanProject(projectDir: string): Promise<ProjectScan> {
   const rawFiles = (await listFiles(projectDir, 'raw')).filter(f => MEDIA_EXT.has(ext(f)));
   if (rawFiles.length === 0) throw new ProjectError('NO_RAW_FOOTAGE', 'raw/ folder has no footage');
   const raw = await probeAll(projectDir, rawFiles, warnings);
+  if (raw.length === 0) throw new ProjectError('NO_RAW_FOOTAGE', `No file in raw/ could be read: ${[...warnings].sort().join('; ')}`);
 
   const refFiles = await listFiles(projectDir, 'reference');
   const media = await probeAll(projectDir, refFiles.filter(f => MEDIA_EXT.has(ext(f))), warnings);
   const scriptFiles = refFiles.filter(f => SCRIPT_EXT.has(ext(f)) && path.basename(f.rel).toLowerCase() !== 'links.txt');
   const scripts = (await Promise.all(scriptFiles.map(async f => ({ path: f.rel, text: await fs.readFile(f.abs, 'utf8') })))).sort(byPath);
+  const images = refFiles.filter(f => IMAGE_EXT.has(ext(f))).map(f => f.rel).sort();
   const linksFile = refFiles.find(f => path.basename(f.rel).toLowerCase() === 'links.txt');
   const links = linksFile
     ? (await fs.readFile(linksFile.abs, 'utf8')).split(/\r?\n/).map(l => l.trim()).filter(l => l.startsWith('http'))
@@ -51,5 +55,5 @@ export async function scanProject(projectDir: string): Promise<ProjectScan> {
 
   const hasGuideline = await fs.stat(path.join(projectDir, 'guideline.md')).then(s => s.isFile(), () => false);
   warnings.sort();
-  return { raw, references: { media, scripts, links }, guidelinePath: hasGuideline ? 'guideline.md' : null, warnings };
+  return { raw, references: { media, scripts, links, images }, guidelinePath: hasGuideline ? 'guideline.md' : null, warnings };
 }

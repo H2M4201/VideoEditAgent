@@ -10,6 +10,7 @@
 - Màu sắc: chính #1F3A5F, nhấn #C9A24B, chữ #FFFFFF (thay bằng mã màu của thương hiệu).
 - Phông chữ: Be Vietnam Pro.
 - Logo: nhỏ, góc trên bên phải, giữ nguyên suốt video; ở 2 giây cuối hiện logo lớn kèm thông tin liên hệ.
+- Tệp logo: đặt vào thư mục `reference/` (PNG, JPG hoặc WebP) và ghi tên tệp ở đây, ví dụ `reference/logo.png`.
 - Nhạc nền: piano nhẹ hoặc ambient, nhịp chậm, nhỏ hơn giọng đọc.
 - Mở đầu bằng góc ngoại thất hoặc view đẹp nhất, kết thúc bằng giá và số điện thoại.
 - Tránh: cảnh quay rung, cắt nhanh, nhạc to, hiệu ứng loè loẹt, quá nhiều chữ, đường chân trời bị nghiêng.

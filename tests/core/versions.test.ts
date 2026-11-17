@@ -21,3 +21,10 @@ test('list returns notes and timestamps in order', async () => { const vs = new 
   expect(Number.isNaN(Date.parse(l[0].createdAt))).toBe(false); });
 test('numbering continues from an existing store', async () => { await new VersionStore(tmp).save(makeTimeline(1), 'a');
   expect(await new VersionStore(tmp).save(makeTimeline(1), 'b')).toBe(2); });
+test('concurrent saves never lose a version', async () => { const vs = new VersionStore(tmp);
+  const ns = await Promise.all(Array.from({ length: 8 }, (_, i) => vs.save(makeTimeline(i + 1), `note ${i}`)));
+  expect([...ns].sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  const l = await vs.list();
+  expect(l.map(v => v.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  for (let i = 0; i < 8; i += 1) expect((await vs.load(ns[i])).segments).toHaveLength(i + 1);
+  expect(new Set(l.map(v => v.note)).size).toBe(8); });

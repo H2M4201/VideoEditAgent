@@ -10,6 +10,7 @@
 - Colours: primary #111111, accent #FF2D55, text #FFFFFF (replace with the brand values).
 - Font: Be Vietnam Pro.
 - Logo: small, top corner, visible from the start so it survives re-posting.
+- Logo file: put it in `reference/` (PNG, JPG or WebP) and name it here, e.g. `reference/logo.png`.
 - Music: trending, strong beat, loud; the beat drives the edit. Drop in on the first beat.
 - Hook in the first second, then a payoff at the end that invites a loop.
 - Avoid: slow intros, long shots, small or thin captions, off-beat cuts, more than three words of caption at once.

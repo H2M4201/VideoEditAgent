@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { resolveOnDisk } from '../project/paths';
 import type { FileAnalysis } from './index';
 
 export const analysisDir = (projectDir: string) => path.join(projectDir, '.vea', 'analysis');
@@ -8,7 +9,7 @@ export const framesDir = (projectDir: string) => path.join(analysisDir(projectDi
 
 /** sha1 of relative path + size + mtime. */
 export async function cacheKey(projectDir: string, relPath: string): Promise<string> {
-  const st = await fs.stat(path.join(projectDir, ...relPath.split('/')));
+  const st = await fs.stat(await resolveOnDisk(projectDir, relPath));
   return createHash('sha1').update(`${relPath}\0${st.size}\0${st.mtimeMs}`).digest('hex');
 }
 

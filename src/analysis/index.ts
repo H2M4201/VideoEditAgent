@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { resolveOnDisk } from '../project/paths';
 import type { MediaInfo, ProjectScan } from '../project/scan';
 import { detectBeats, meanVolumeDb, SILENT_DB } from './audio';
 import { cacheKey, framesDir, readCache, writeCache } from './cache';
@@ -25,7 +26,7 @@ export async function analyseFile(projectDir: string, m: MediaInfo, deps: { tran
   const cached = await readCache(projectDir, key);
   if (cached) return cached;
 
-  const abs = path.join(projectDir, ...m.path.split('/'));
+  const abs = await resolveOnDisk(projectDir, m.path);
   let shots: Shot[] = [];
   let cutsPerMinute: number | null = null;
   if (m.kind === 'video') {

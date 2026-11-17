@@ -10,9 +10,9 @@ let dir: string;
 beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vea-links-')); });
 afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
 
-// fake run: writes the file named by the -o arg
+// fake run: writes the file named by the -o arg (an output template: "%%" is a literal "%", as yt-dlp reads it)
 const okRun = () => vi.fn(async (_bin: string, args: string[]) => {
-  fs.writeFileSync(args[args.indexOf('-o') + 1], 'x');
+  fs.writeFileSync(args[args.indexOf('-o') + 1].replace(/%%/g, '%'), 'x');
   return { stdout: '' };
 });
 const asRun = (f: unknown) => f as never;
@@ -26,8 +26,19 @@ describe('downloadLinks', () => {
     expect(fs.existsSync(path.join(dir, '.vea', 'downloads', `${sha1(url)}.mp4`))).toBe(true);
     const [bin, args] = run.mock.calls[0];
     expect(bin).toBe('yt-dlp');
-    expect(args.slice(0, 3)).toEqual(['-f', 'mp4/best', '--no-playlist']);
+    expect(args.slice(0, 4)).toEqual(['--ignore-config', '-f', 'mp4/best', '--no-playlist']);
     expect(args[args.length - 1]).toBe(url);
+  });
+
+  it('escapes % in the project path for the yt-dlp output template', async () => {
+    const pct = path.join(dir, '100% villa %(title)s');
+    fs.mkdirSync(pct);
+    const run = okRun();
+    const url = 'https://youtu.be/x';
+    const [r] = await downloadLinks(pct, [url], { ytDlp: 'yt-dlp', run: asRun(run) });
+    const [, args] = run.mock.calls[0];
+    expect(args[args.indexOf('-o') + 1]).toBe(path.join(pct, '.vea', 'downloads', `${sha1(url)}.mp4`).replace(/%/g, '%%'));
+    expect(r).toEqual({ url, ok: true, path: `.vea/downloads/${sha1(url)}.mp4` });
   });
 
   it('reports stderr on failure and still processes others, in order', async () => {
