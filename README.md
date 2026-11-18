@@ -42,6 +42,8 @@ Open http://127.0.0.1:4317. The server listens on 127.0.0.1 only and has no logi
 - **AI key** is stored in the app folder's `.env` file as `AI_PROVIDER_KEY` (mode 0600, git-ignored). You can also copy `.env.example` to `.env` and fill it in by hand; edits apply without a restart. If `.env` has no key, an `AI_PROVIDER_KEY` set in the system environment is used. The page shows only the last 4 characters and says where the current key comes from. A key left in `settings.json` by an older version is moved into `.env` at startup.
 - **Everything else** (model, language, Whisper binary and model paths, yt-dlp path, token prices) is stored in `~/.vea/settings.json` (mode 0600).
 
+How it is built and what happens at each step: [docs/architecture.md](docs/architecture.md).
+
 ## Project folder layout
 
 ```
