@@ -22,7 +22,7 @@ const ENGINE_IDS = ['builtin', 'capcut'] as const;
 const CAPCUT_PLACEHOLDER = { id: 'capcut', capabilities: null, available: false, reason: 'CapCut engine is not installed in this version.' };
 
 const SettingsPatch = z.object({
-  apiKey: z.string(), model: z.string().min(1), language: z.enum(['vi', 'en']), defaultEngine: z.enum(ENGINE_IDS),
+  apiKey: z.string().trim().refine(v => !/[\u0000-\u001f\u007f]/.test(v), 'The AI key cannot contain line breaks or control characters'), model: z.string().min(1), language: z.enum(['vi', 'en']), defaultEngine: z.enum(ENGINE_IDS),
   capcutDraftsDir: z.string(), whisperBinary: z.string().min(1), whisperModel: z.string(), ytDlpBinary: z.string().min(1),
   inputPricePerMTok: z.number().min(0), outputPricePerMTok: z.number().min(0),
 }).partial(); // unknown keys (incl. projects, managed by /api/projects) are dropped
@@ -30,9 +30,10 @@ const SettingsPatch = z.object({
 const sendError = (reply: FastifyReply, status: number, code: string, message: string) => reply.code(status).send({ error: { code, message } });
 const publicSettings = (s: Settings) => ({ ...s, apiKey: maskApiKey(s.apiKey) });
 
-/** Inside a project's .vea folder only renders and downloaded samples are served (not analysis, settings-like state). */
+/** Inside a project's .vea folder only renders and downloaded samples are served (not analysis, settings-like state). `.env` files are never served. */
 function servable(rel: string): boolean {
   const parts = rel.split(path.sep);
+  if (/^\.env(\..*)?$/i.test(parts[parts.length - 1] ?? '')) return false;
   return parts[0] !== '.vea' || (parts.length > 2 && (parts[1] === 'videos' || parts[1] === 'downloads'));
 }
 

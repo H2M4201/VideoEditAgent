@@ -3,3 +3,5 @@ dist
 .vea
 .superpowers
 .env
+.env.*
+!.env.example

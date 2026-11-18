@@ -44,6 +44,7 @@ function formatValue(v: string): string {
 
 /** Sets `name` in place (or appends it), keeping every other line, comment and line ending. Empty/null removes it. */
 export function setEnvValue(text: string, name: string, value: string | null): string {
+  if (value && /[\u0000-\u001f\u007f]/.test(value)) throw new Error(`${name} cannot contain line breaks or control characters`);
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
   const lines = text === '' ? [] : text.split(/\r?\n/);
   const trailing = lines.length > 0 && lines[lines.length - 1] === '';
@@ -70,7 +71,12 @@ export async function readEnvFile(file: string): Promise<string> {
 export async function writeEnvFile(file: string, text: string): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  await fs.writeFile(tmp, text, { mode: 0o600 });
-  await fs.chmod(tmp, 0o600);
-  await fs.rename(tmp, file);
+  try {
+    await fs.writeFile(tmp, text, { mode: 0o600 });
+    await fs.chmod(tmp, 0o600);
+    await fs.rename(tmp, file);
+  } catch (e) {
+    await fs.rm(tmp, { force: true }); // the temp file holds the key: never leave it behind
+    throw e;
+  }
 }

@@ -47,3 +47,14 @@ test('write is private and atomic; read of a missing file is empty', async () =>
   expect((await fs.stat(f)).mode & 0o777).toBe(0o600);
   expect((await fs.readdir(path.dirname(f))).filter(n => n !== '.env')).toEqual([]);
 });
+
+test('values with line breaks or NUL are refused', () => {
+  for (const v of ['a\nB=1', 'a\rb', 'a\0b']) expect(() => setEnvValue('', KEY_VAR, v)).toThrow(/line break|control/);
+});
+
+test('a failed write leaves no temp file behind', async () => {
+  const dir = path.join(tmp, 'is-a-dir');
+  await fs.mkdir(path.join(dir, 'child'), { recursive: true });
+  await expect(writeEnvFile(dir, 'A=1\n')).rejects.toThrow();
+  expect((await fs.readdir(tmp)).filter(n => n.endsWith('.tmp'))).toEqual([]);
+});

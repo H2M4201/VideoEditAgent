@@ -79,6 +79,7 @@ export async function fileResponse(root: string, urlPath: string, range: string 
 
 /** Inside the project's .vea folder a render may read only downloaded samples (never analysis, renders or settings-like state). */
 function servable(rel: string): boolean {
+  if (/^\.env(\..*)?$/i.test(path.basename(rel))) return false;
   const parts = rel.split(path.sep);
   return parts[0] !== '.vea' || (parts.length > 2 && parts[1] === 'downloads');
 }
