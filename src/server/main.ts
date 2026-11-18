@@ -9,8 +9,11 @@ import { SettingsStore } from './settings';
 import { registerWebUi } from './webui';
 
 const port = Number(process.env.VEA_PORT ?? 4317);
+const settings = new SettingsStore();
+// Older versions kept the AI key in settings.json; it now lives in .env as AI_PROVIDER_KEY.
+if ((await settings.migrate()) === 'moved') console.log(`Moved the AI key from settings.json to ${settings.envFile}`);
 const app = buildApp({
-  settings: new SettingsStore(),
+  settings,
   queue: new JobQueue(),
   model: s => new AnthropicModel({ apiKey: s.apiKey, model: s.model }),
   transcriber: s => new WhisperCppTranscriber({ binary: s.whisperBinary, modelPath: s.whisperModel }),

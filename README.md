@@ -4,10 +4,10 @@ A local app for a video agency. You put raw footage and references in a folder, 
 
 ## Bắt đầu nhanh (Tiếng Việt)
 
-1. Cài Node.js 20+, ffmpeg (có ffprobe), yt-dlp, whisper.cpp (`whisper-cli`) cùng một file model, và có sẵn khóa API của Anthropic.
+1. Cài Node.js 20+, ffmpeg (có ffprobe), yt-dlp, whisper.cpp (`whisper-cli`) cùng một file model, và có sẵn khóa AI (Claude).
 2. Trong thư mục dự án chạy: `npm install`, rồi `npm run build:web`, rồi `npm start`.
 3. Mở http://127.0.0.1:4317. Giao diện mặc định là tiếng Việt (có thể đổi sang English trong Cài đặt).
-4. Vào Cài đặt: dán khóa API, nhập đường dẫn `whisper-cli` và file model Whisper.
+4. Vào Cài đặt: dán khóa AI (được lưu vào tệp `.env` của ứng dụng, biến `AI_PROVIDER_KEY`), nhập đường dẫn `whisper-cli` và file model Whisper.
 5. Tạo thư mục dự án gồm `raw/` (cảnh quay thô) và `reference/` (nhạc, giọng đọc, video mẫu, kịch bản), chọn thư mục đó trong ứng dụng, viết yêu cầu, kiểm tra vai trò của từng file tham chiếu, rồi bấm tạo video.
 6. Xem video, gõ góp ý (ví dụ "đổi cảnh ở 0:03"), duyệt (khóa) những đoạn đã ưng ý, hoặc quay lại phiên bản cũ.
 7. Lần dựng đầu tiên trên một máy cần internet một lần để Remotion tải trình duyệt của nó. Chỉ khung hình mẫu và bản ghi lời thoại được gửi cho AI; video gốc luôn ở trên máy bạn.
@@ -27,7 +27,7 @@ The agent never edits video itself; it writes and patches a timeline (all times 
 - `ffmpeg` and `ffprobe` on PATH
 - `yt-dlp` (only for links in `reference/links.txt`)
 - whisper.cpp `whisper-cli` and a Whisper model file (local transcription)
-- An Anthropic API key
+- An AI key (Claude, from the Anthropic Console)
 
 ## Install and run
 
@@ -37,7 +37,10 @@ npm run build:web
 npm start
 ```
 
-Open http://127.0.0.1:4317. The server listens on 127.0.0.1 only and has no login; do not expose it. `VEA_PORT` changes the port. Settings (API key, model, language, Whisper binary and model paths, yt-dlp path, token prices) are stored in `~/.vea/settings.json` (mode 0600) and edited in the Settings page.
+Open http://127.0.0.1:4317. The server listens on 127.0.0.1 only and has no login; do not expose it. `VEA_PORT` changes the port. Everything is configured in the Settings page:
+
+- **AI key** is stored in the app folder's `.env` file as `AI_PROVIDER_KEY` (mode 0600, git-ignored). You can also copy `.env.example` to `.env` and fill it in by hand; edits apply without a restart. If `.env` has no key, an `AI_PROVIDER_KEY` set in the system environment is used. The page shows only the last 4 characters and says where the current key comes from. A key left in `settings.json` by an older version is moved into `.env` at startup.
+- **Everything else** (model, language, Whisper binary and model paths, yt-dlp path, token prices) is stored in `~/.vea/settings.json` (mode 0600).
 
 ## Project folder layout
 
@@ -135,4 +138,4 @@ Rendering tests need a browser for Remotion: either allow its one-time download 
 npx tsx scripts/acceptance.ts <projectDir> "<prompt>" ["<feedback>"]
 ```
 
-It reads the API key from `~/.vea/settings.json` or `ANTHROPIC_API_KEY`, and the Whisper paths from the same settings file. It runs prepare, generate and, if feedback is given, one fix, then prints the roles (with who decided each), the timing driver, the cost estimate, what was not followed, the output paths, and after a fix the ids whose content changed and whether the total duration changed. It exits with an error message if the key, ffmpeg or the Whisper binary is missing. With no arguments it prints its usage.
+It reads the AI key the same way as the app (`.env`, then the `AI_PROVIDER_KEY` environment variable), and the Whisper paths from `~/.vea/settings.json`. It runs prepare, generate and, if feedback is given, one fix, then prints the roles (with who decided each), the timing driver, the cost estimate, what was not followed, the output paths, and after a fix the ids whose content changed and whether the total duration changed. It exits with an error message if the key, ffmpeg or the Whisper binary is missing. With no arguments it prints its usage.

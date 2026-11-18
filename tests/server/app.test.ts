@@ -124,6 +124,17 @@ describe('settings and engines', () => {
     await app.inject({ method: 'PUT', url: '/api/settings', payload: { language: 'vi' } });
   });
 
+  test('settings report where the key comes from; keySource in a PUT is ignored; the mask leaves .env untouched', async () => {
+    const s = (await get('/api/settings')).json();
+    expect(s.keySource).toBe('env-file');
+    expect(s.apiKey).not.toBe(KEY);
+    const before = await fs.readFile(settings.envFile, 'utf8');
+    const r = await app.inject({ method: 'PUT', url: '/api/settings', payload: { ...s, keySource: 'environment' } });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().keySource).toBe('env-file');
+    expect(await fs.readFile(settings.envFile, 'utf8')).toBe(before);
+  });
+
   test('PUT /api/settings rejects bad values and ignores projects', async () => {
     const bad = await app.inject({ method: 'PUT', url: '/api/settings', payload: { language: 'fr' } });
     expect(bad.statusCode).toBe(400);
