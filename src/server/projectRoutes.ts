@@ -36,12 +36,13 @@ const within = (child: string, parent: string) => child === parent || child.star
 
 /**
  * /media serves everything under a project folder, so a project may not be the filesystem root, the home folder,
- * or a folder that holds (or lies inside) the settings directory with the API key.
+ * a folder that holds (or lies inside) the settings directory, or a folder that holds the app's .env with the AI key.
  */
-async function refuseUnsafeFolder(real: string, settingsDir: string): Promise<void> {
+async function refuseUnsafeFolder(real: string, settingsDir: string, envDir: string): Promise<void> {
   const settingsReal = await fs.realpath(settingsDir).catch(() => path.resolve(settingsDir));
+  const envReal = await fs.realpath(envDir).catch(() => path.resolve(envDir));
   const home = await fs.realpath(os.homedir()).catch(() => os.homedir());
-  if (real === path.parse(real).root || real === home || within(settingsReal, real) || within(real, settingsReal)) {
+  if (real === path.parse(real).root || real === home || within(settingsReal, real) || within(real, settingsReal) || within(real, envReal)) {
     throw new AppError('UNSAFE_FOLDER', `${real} cannot be a project folder (it is the root, the home folder, or holds the app settings). Choose the folder of one shoot.`);
   }
 }
@@ -67,7 +68,7 @@ export function registerProjectRoutes(app: FastifyInstance, deps: AppDeps & { en
   app.post('/api/projects', async req => {
     const { dir } = parseBody(RegisterBody, req.body);
     const real = await fs.realpath(dir).catch(() => path.resolve(dir));
-    await refuseUnsafeFolder(real, path.dirname(deps.settings.file));
+    await refuseUnsafeFolder(real, path.dirname(deps.settings.file), path.dirname(deps.settings.envFile));
     await ensureFfmpeg();
     const scan = await scanProject(real);
     const id = projectId(real);

@@ -124,6 +124,17 @@ describe('settings and engines', () => {
     await app.inject({ method: 'PUT', url: '/api/settings', payload: { language: 'vi' } });
   });
 
+  test('settings report where the key comes from; keySource in a PUT is ignored; the mask leaves .env untouched', async () => {
+    const s = (await get('/api/settings')).json();
+    expect(s.keySource).toBe('env-file');
+    expect(s.apiKey).not.toBe(KEY);
+    const before = await fs.readFile(settings.envFile, 'utf8');
+    const r = await app.inject({ method: 'PUT', url: '/api/settings', payload: { ...s, keySource: 'environment' } });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().keySource).toBe('env-file');
+    expect(await fs.readFile(settings.envFile, 'utf8')).toBe(before);
+  });
+
   test('PUT /api/settings rejects bad values and ignores projects', async () => {
     const bad = await app.inject({ method: 'PUT', url: '/api/settings', payload: { language: 'fr' } });
     expect(bad.statusCode).toBe(400);
@@ -187,6 +198,32 @@ describe('projects', () => {
       const r = await post('/api/projects', { dir });
       expect([r.statusCode, r.json().error.code], dir).toEqual([400, 'UNSAFE_FOLDER']);
     }
+  });
+
+  test('a folder holding the app .env (wherever it is) cannot be a project, and .env files are never served', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vea-appdir-'));
+    const appDir = path.join(root, 'app');
+    await fs.mkdir(appDir, { recursive: true });
+    const store = new SettingsStore(path.join(root, 'home', 'settings.json'), { envFile: path.join(appDir, '.env') });
+    await store.update({ apiKey: 'sk-ant-secret-9999' });
+    const other = buildApp({ settings: store, queue: new JobQueue(), model: () => model, transcriber: () => fakeTranscriber, ytDlpRun });
+    for (const dir of [appDir, root]) {
+      const r = await other.inject({ method: 'POST', url: '/api/projects', headers: { host: 'localhost:4317' }, payload: { dir } });
+      expect([r.statusCode, r.json().error.code], dir).toEqual([400, 'UNSAFE_FOLDER']);
+    }
+    await other.close();
+    await fs.writeFile(path.join(proj, '.env'), 'AI_PROVIDER_KEY=leak\n');
+    await fs.writeFile(path.join(proj, 'raw', '.env.local'), 'X=1\n');
+    for (const f of ['.env', 'raw/.env.local']) expect((await get(`/media/${projectId}/${f}`)).statusCode, f).toBe(403);
+  });
+
+  test('a key with a line break is rejected; surrounding spaces are trimmed', async () => {
+    const bad = await app.inject({ method: 'PUT', url: '/api/settings', headers: { host: 'localhost:4317' }, payload: { apiKey: 'abc\nOTHER=evil' } });
+    expect(bad.statusCode).toBe(400);
+    expect(await fs.readFile(settings.envFile, 'utf8')).not.toContain('OTHER');
+    const ok = await app.inject({ method: 'PUT', url: '/api/settings', headers: { host: 'localhost:4317' }, payload: { apiKey: '  sk-trimmed-5678 ' } });
+    expect(ok.statusCode).toBe(200);
+    expect((await settings.get()).apiKey).toBe('sk-trimmed-5678');
   });
 
   test('bad folders are rejected with the project error code', async () => {

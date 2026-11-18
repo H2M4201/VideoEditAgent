@@ -30,7 +30,7 @@ export class AnthropicModel implements AgentModel {
   }
 
   async run(req: { system: string; messages: unknown[]; tools: ToolDef[] }): Promise<ModelTurn> {
-    if (!this.client) throw new AgentError('NO_API_KEY', 'No Anthropic API key is set');
+    if (!this.client) throw new AgentError('NO_API_KEY', 'No AI key is set');
     let res: Anthropic.Message;
     try {
       res = await this.client.messages.create({

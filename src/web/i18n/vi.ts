@@ -39,7 +39,7 @@ export const vi = {
   prompt: 'Yêu cầu',
   promptHint: 'Ví dụ: video 45 giây, nhẹ nhàng, kết thúc ở hồ bơi',
   checkReferences: 'Kiểm tra tham chiếu',
-  noKeyNotice: 'Chưa có khóa API Anthropic, nên chưa thể kiểm tra tham chiếu.',
+  noKeyNotice: 'Chưa có khóa AI, nên chưa thể kiểm tra tham chiếu.',
   noKeyLink: 'Mở Cài đặt',
   references: 'Tệp tham chiếu',
   noReferences: 'Dự án không có tệp tham chiếu; trợ lý sẽ tự dựng từ cảnh quay.',
@@ -108,7 +108,11 @@ export const vi = {
 
   // Settings
   'settings.title': 'Cài đặt',
-  'settings.apiKey': 'Khóa API Anthropic',
+  'settings.apiKey': 'Khóa AI (Claude)',
+  'settings.keyHint': 'Lưu trong tệp .env của ứng dụng (AI_PROVIDER_KEY).',
+  'settings.keySource.env-file': 'Đang dùng khóa trong .env.',
+  'settings.keySource.environment': 'Đang dùng khóa từ biến môi trường của hệ thống. Khóa nhập ở đây sẽ được ưu tiên.',
+  'settings.keySource.none': 'Chưa có khóa.',
   'settings.model': 'Mô hình AI',
   'settings.language': 'Ngôn ngữ',
   'settings.defaultEngine': 'Công cụ dựng mặc định',
@@ -123,7 +127,7 @@ export const vi = {
   'language.en': 'English',
 
   // Errors
-  'error.NO_API_KEY': 'Chưa có khóa API Anthropic. Hãy nhập khóa trong Cài đặt.',
+  'error.NO_API_KEY': 'Chưa có khóa AI. Hãy nhập khóa trong Cài đặt.',
   'error.TRANSCRIBE_FAILED': 'Không chuyển được giọng nói thành chữ. Hãy kiểm tra đường dẫn chương trình Whisper và tệp mô hình trong Cài đặt.',
   'error.FFMPEG_MISSING': 'Không tìm thấy ffmpeg. Hãy cài ffmpeg (đã gồm ffprobe) và thêm vào PATH.',
   'error.UNSAFE_FOLDER': 'Không thể dùng thư mục này làm dự án (thư mục gốc, thư mục cá nhân hoặc nơi chứa cài đặt). Hãy chọn thư mục của một buổi quay.',

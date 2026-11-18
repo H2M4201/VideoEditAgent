@@ -43,7 +43,7 @@ export function ensureFfmpeg(): Promise<void> {
 }
 
 function requireApiKey(s: Settings): void {
-  if (!s.apiKey) throw new AgentError('NO_API_KEY', 'No Anthropic API key is set. Add it in Settings.');
+  if (!s.apiKey) throw new AgentError('NO_API_KEY', 'No AI key is set. Add it in Settings (saved as AI_PROVIDER_KEY in .env).');
 }
 
 /** Turns any transcriber failure into TRANSCRIBE_FAILED, naming the settings that point at Whisper. */

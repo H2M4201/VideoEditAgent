@@ -4,7 +4,7 @@
  *   npx tsx scripts/acceptance.ts <projectDir> "<prompt>" ["<feedback>"]
  *
  * prepare -> generate (built-in engine) -> optional fix, calling the pipeline functions directly (no HTTP).
- * The API key comes from ~/.vea/settings.json or the ANTHROPIC_API_KEY environment variable.
+ * The AI key comes from the app's .env (AI_PROVIDER_KEY) or the AI_PROVIDER_KEY environment variable.
  */
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -44,9 +44,10 @@ async function main(): Promise<void> {
   if (!dirArg || !prompt) { console.error(USAGE); process.exit(1); }
   const dir = await fs.realpath(path.resolve(dirArg)).catch(() => fail(`project folder ${dirArg} does not exist`));
 
-  const settings = await new SettingsStore().get();
-  const apiKey = process.env.ANTHROPIC_API_KEY || settings.apiKey;
-  if (!apiKey) fail('no Anthropic API key. Set ANTHROPIC_API_KEY or add it in ~/.vea/settings.json (apiKey).');
+  const settingsStore = new SettingsStore();
+  await settingsStore.migrate();
+  const settings = await settingsStore.get();
+  if (!settings.apiKey) fail(`no AI key. Add it in the app's Settings page, or set AI_PROVIDER_KEY in ${settingsStore.envFile}.`);
   await requireBinary('ffmpeg', 'ffmpeg', ['-version']);
   await requireBinary('ffprobe', 'ffprobe', ['-version']);
   await requireBinary(settings.whisperBinary, 'The whisper binary', ['--help']);
@@ -55,7 +56,7 @@ async function main(): Promise<void> {
   }
 
   const deps: JobDeps = {
-    settings: { ...settings, apiKey },
+    settings,
     model: s => new AnthropicModel({ apiKey: s.apiKey, model: s.model }),
     transcriber: s => new WhisperCppTranscriber({ binary: s.whisperBinary, modelPath: s.whisperModel }),
     engines: () => builtinEngine,

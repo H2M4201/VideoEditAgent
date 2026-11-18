@@ -2,3 +2,6 @@ node_modules
 dist
 .vea
 .superpowers
+.env
+.env.*
+!.env.example
