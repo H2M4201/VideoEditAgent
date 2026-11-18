@@ -20,7 +20,7 @@ export function Settings({ settings, onSaved }: Props) {
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    const { projects: _projects, ...patch } = form;
+    const { projects: _projects, keySource: _keySource, ...patch } = form;
     try { const saved = await api.saveSettings(patch); setForm(saved); onSaved(saved); setStatus('saved'); }
     catch (err) { setStatus(err instanceof ApiError ? err : { code: 'INTERNAL', message: (err as Error).message }); }
   }
@@ -31,6 +31,10 @@ export function Settings({ settings, onSaved }: Props) {
       {TEXT.map(([k, label]) => (
         <Labelled key={k} id={k} label={t(label)}>
           <input id={k} type={k === 'apiKey' ? 'password' : 'text'} autoComplete="off" value={form[k]} onChange={e => set(k, e.target.value)} />
+          {k === 'apiKey' && <>
+            <p className="muted">{t('settings.keyHint')}</p>
+            <p className="muted">{t(`settings.keySource.${form.keySource}`)}</p>
+          </>}
         </Labelled>
       ))}
       <Labelled id="language" label={t('settings.language')}>
